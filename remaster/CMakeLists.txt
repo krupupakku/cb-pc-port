@@ -53,7 +53,10 @@ target_include_directories(cb_boot PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
 # =============================================================================
 add_executable(crashbash_remaster
     src/main.cpp
-    src/core/psyq_shim.cpp
+    src/core/mips_cpu.cpp
+    src/core/gte.cpp
+    src/core/gpu.cpp
+    src/core/console.cpp
     src/renderer/renderer.cpp
     src/input/input_manager.cpp
     src/audio/audio_manager.cpp

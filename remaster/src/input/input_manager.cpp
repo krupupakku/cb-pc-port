@@ -75,6 +75,11 @@ void PollControllers() {
                 double rad = std::atan2(static_cast<double>(lx), static_cast<double>(ly));
                 int32_t bashAng = static_cast<int32_t>((rad / (2.0 * 3.14159265358979323846)) * 4096.0);
                 angle = bashAng & 0xFFF;
+                // Il pad virtuale e' digitale: lo stick sinistro viene mappato sulla croce direzionale
+                if (ly >  16000) held |= CB_BTN_UP;
+                if (ly < -16000) held |= CB_BTN_DOWN;
+                if (lx >  16000) held |= CB_BTN_RIGHT;
+                if (lx < -16000) held |= CB_BTN_LEFT;
             }
         }
 

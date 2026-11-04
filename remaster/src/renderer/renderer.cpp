@@ -5,10 +5,15 @@
 #include <cstdio>
 #include <filesystem>
 #include <string>
+#include <vector>
 
 #ifdef _WIN32
 #include <windows.h>
 #include <GL/gl.h>
+#endif
+
+#ifndef GL_UNPACK_ROW_LENGTH
+#define GL_UNPACK_ROW_LENGTH 0x0CF2
 #endif
 
 #define STB_IMAGE_IMPLEMENTATION
@@ -342,6 +347,68 @@ void EndFrame() {
     if (g_hdc) {
         SwapBuffers(g_hdc);
     }
+#endif
+}
+
+void SetWindowTitle(const char* title) {
+#ifdef _WIN32
+    if (g_hwnd) SetWindowTextA(g_hwnd, title);
+#else
+    (void)title;
+#endif
+}
+
+void PresentPsxFrame(const uint16_t* vram, int x0, int y0, int w, int h, bool enabled, float aspect) {
+#ifdef _WIN32
+    static GLuint tex = 0;
+    static std::vector<uint32_t> rgba(1024 * 512);
+    if (!tex) {
+        glGenTextures(1, &tex);
+        glBindTexture(GL_TEXTURE_2D, tex);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 1024, 512, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+    }
+    glViewport(0, 0, g_winWidth, g_winHeight);
+    glDisable(GL_BLEND);
+    glClearColor(0, 0, 0, 1);
+    glClear(GL_COLOR_BUFFER_BIT);
+    if (enabled && w > 0 && h > 0) {
+        for (int j = 0; j < h; j++) {
+            for (int i = 0; i < w; i++) {
+                uint16_t p = vram[((y0 + j) & 511) * 1024 + ((x0 + i) & 1023)];
+                uint32_t r = (p & 31) << 3, g = ((p >> 5) & 31) << 3, b = ((p >> 10) & 31) << 3;
+                rgba[j * 1024 + i] = 0xFF000000u | (b << 16) | (g << 8) | r;
+            }
+        }
+        glBindTexture(GL_TEXTURE_2D, tex);
+        glPixelStorei(GL_UNPACK_ROW_LENGTH, 1024);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, rgba.data());
+        glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+
+        // Letterbox con aspect ratio richiesto
+        float winAspect = (float)g_winWidth / (float)(g_winHeight ? g_winHeight : 1);
+        float sx = 1.0f, sy = 1.0f;
+        if (winAspect > aspect) sx = aspect / winAspect; else sy = winAspect / aspect;
+
+        glMatrixMode(GL_PROJECTION); glLoadIdentity();
+        glMatrixMode(GL_MODELVIEW);  glLoadIdentity();
+        glEnable(GL_TEXTURE_2D);
+        glColor4f(1, 1, 1, 1);
+        float u1 = (float)w / 1024.0f, v1 = (float)h / 512.0f;
+        glBegin(GL_QUADS);
+        glTexCoord2f(0, 0);   glVertex2f(-sx,  sy);
+        glTexCoord2f(u1, 0);  glVertex2f( sx,  sy);
+        glTexCoord2f(u1, v1); glVertex2f( sx, -sy);
+        glTexCoord2f(0, v1);  glVertex2f(-sx, -sy);
+        glEnd();
+        glDisable(GL_TEXTURE_2D);
+    }
+    if (g_hdc) SwapBuffers(g_hdc);
+#else
+    (void)vram; (void)x0; (void)y0; (void)w; (void)h; (void)enabled; (void)aspect;
 #endif
 }
 

@@ -17,4 +17,9 @@ void BeginFrame(uint64_t frameCount);
 void SubmitOrderingTable();
 void EndFrame();
 
+// Mostra l'area di display della VRAM PS1 (RGB555, 1024x512) nella finestra, mantenendo l'aspect ratio.
+// enabled=false => schermo nero. aspect = rapporto larghezza/altezza desiderato (es. 4/3 o 16/9).
+void PresentPsxFrame(const uint16_t* vram, int x, int y, int w, int h, bool enabled, float aspect);
+void SetWindowTitle(const char* title);
+
 } // namespace cb::renderer
