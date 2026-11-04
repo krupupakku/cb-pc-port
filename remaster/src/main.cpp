@@ -75,7 +75,7 @@ int main(int argc, char* argv[]) {
     const double frameTime = 1.0 / 59.94;
     uint64_t frames = 0;
     bool halted = false;
-    double fpsAcc = 0; int fpsCnt = 0;
+    double fpsAcc = 0, cpuAcc = 0; int fpsCnt = 0, videoFrames = 0;
 
     while (cb::renderer::ProcessWindowEvents()) {
         cb::input::PollControllers();
@@ -84,7 +84,12 @@ int main(int argc, char* argv[]) {
             console.set_pad(p, (c.flags & cb::input::CB_CTRL_CONNECTED) != 0 || p == 0, (uint16_t)c.buttonsHeld);
         }
 
-        int consumed = halted ? 0 : console.run_frame();
+        int consumed = 0;
+        LARGE_INTEGER t0, t1;
+        QueryPerformanceCounter(&t0);
+        consumed = halted ? 0 : console.run_frame();
+        QueryPerformanceCounter(&t1);
+        double emuSec = (double)(t1.QuadPart - t0.QuadPart) / (double)freq.QuadPart;
         if (!halted && consumed == 0) halted = true;
 
         const auto& g = console.gpu;
@@ -97,14 +102,15 @@ int main(int argc, char* argv[]) {
         for (;;) {
             QueryPerformanceCounter(&now);
             double dt = (double)(now.QuadPart - last.QuadPart) / (double)freq.QuadPart;
-            if (dt >= target) { fpsAcc += dt; fpsCnt++; last = now; break; }
+            if (dt >= target) { fpsAcc += dt; fpsCnt++; videoFrames += (consumed > 0 ? consumed : 1); cpuAcc += emuSec / target; last = now; break; }
             if (target - dt > 0.002) Sleep(1);
         }
         if (fpsAcc >= 1.0) {
-            char t[160];
-            std::snprintf(t, sizeof t, "Crash Bash: Remaster+ | %.1f FPS%s", fpsCnt / fpsAcc, halted ? " | CPU FERMA" : "");
+            char t[200];
+            std::snprintf(t, sizeof t, "Crash Bash: Remaster+ | video %.1f Hz | gioco %.1f fps | carico CPU emulazione %.0f%%%s",
+                          videoFrames / fpsAcc, fpsCnt / fpsAcc, 100.0 * cpuAcc / (fpsCnt ? fpsCnt : 1), halted ? " | CPU FERMA" : "");
             cb::renderer::SetWindowTitle(t);
-            fpsAcc = 0; fpsCnt = 0;
+            fpsAcc = 0; fpsCnt = 0; videoFrames = 0; cpuAcc = 0;
         }
 #endif
     }

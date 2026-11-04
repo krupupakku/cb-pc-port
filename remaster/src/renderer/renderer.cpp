@@ -121,17 +121,28 @@ bool Initialize(uint32_t internalWidth, uint32_t internalHeight, bool widescreen
     wc.lpszClassName = "CrashBashRemasterWndClass";
     RegisterClassA(&wc);
 
+    SetProcessDPIAware();   // coordinate reali in pixel (niente scaling sfocato / finestra "fuori schermo")
+
+    // Dimensiona la finestra per stare sempre dentro l'area utile dello schermo (4:3 di default)
+    RECT work{};
+    SystemParametersInfoA(SPI_GETWORKAREA, 0, &work, 0);
+    int workW = work.right - work.left, workH = work.bottom - work.top;
+    int clientH = (int)(workH * 0.80f); if (clientH > 1080) clientH = 1080;
+    int clientW = clientH * 4 / 3;
+    if (clientW > (int)(workW * 0.90f)) { clientW = (int)(workW * 0.90f); clientH = clientW * 3 / 4; }
+    g_winWidth = clientW; g_winHeight = clientH;
+
     RECT rect = { 0, 0, g_winWidth, g_winHeight };
     AdjustWindowRect(&rect, WS_OVERLAPPEDWINDOW, FALSE);
+    int totW = rect.right - rect.left, totH = rect.bottom - rect.top;
+    int posX = work.left + (workW - totW) / 2, posY = work.top + (workH - totH) / 2;
 
     g_hwnd = CreateWindowExA(
         0,
         wc.lpszClassName,
-        "Crash Bash: Remaster+ | 4K Pipeline | XInput / SteamInput (4P) [Premi ESC per uscire]",
+        "Crash Bash: Remaster+",
         WS_OVERLAPPEDWINDOW | WS_VISIBLE,
-        CW_USEDEFAULT, CW_USEDEFAULT,
-        rect.right - rect.left,
-        rect.bottom - rect.top,
+        posX, posY, totW, totH,
         nullptr, nullptr, hInstance, nullptr
     );
 
