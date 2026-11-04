@@ -108,16 +108,19 @@ struct G {
         c.gte_d[16] = c.gte_d[17]; c.gte_d[17] = c.gte_d[18]; c.gte_d[18] = c.gte_d[19];
         c.gte_d[19] = clampi(zs, 0, 65535);
         uint32_t H = (uint16_t)c.gte_c[26]; uint32_t sz3 = (uint16_t)c.gte_d[19];
-        int64_t n = sz3 ? std::min<int64_t>(0x1FFFF, ((int64_t)H * 0x20000 + sz3 / 2) / sz3) : 0x1FFFF;
-        if (sz3 * 2 <= H) n = 0x1FFFF;
-        int64_t mx = n * c.gte_d[9] + c.gte_c[24];
-        int64_t my = n * c.gte_d[10] + c.gte_c[25];
+        int64_t div = 0x1FFFF;
+        if (sz3 > 0 && sz3 * 2 > H) {
+            div = (((int64_t)H * 0x20000 / sz3) + 1) / 2;
+            if (div > 0x1FFFF) div = 0x1FFFF;
+        }
+        int64_t mx = div * c.gte_d[9] + c.gte_c[24];
+        int64_t my = div * c.gte_d[10] + c.gte_c[25];
         c.gte_d[12] = c.gte_d[13]; c.gte_d[13] = c.gte_d[14];
         int32_t sx = clampi(mx >> 16, -1024, 1023), sy = clampi(my >> 16, -1024, 1023);
         c.gte_d[14] = (int32_t)(((uint32_t)(uint16_t)sy << 16) | (uint16_t)sx);
         if (last) {
-            int64_t m0 = n * (int16_t)c.gte_c[27] + c.gte_c[28];
-            c.gte_d[24] = (int32_t)m0; c.gte_d[8] = clampi(m0 >> 12, 0, 4096);
+            int64_t m0 = div * (int16_t)c.gte_c[27] + c.gte_c[28];
+            c.gte_d[24] = (int32_t)m0; c.gte_d[8] = clampi(m0 >> 12, 0, 65535);
         }
     }
 };

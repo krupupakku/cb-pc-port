@@ -106,8 +106,9 @@ int main(int argc, char* argv[]) {
             if (target - dt > 0.002) Sleep(1);
         }
         if (fpsAcc >= 1.0) {
-            char t[200];
-            std::snprintf(t, sizeof t, "Crash Bash: Remaster+ | video %.1f Hz | gioco %.1f fps | carico CPU emulazione %.0f%%%s",
+            char t[220];
+            std::snprintf(t, sizeof t, "Crash Bash: Remaster+ | %dx%d (disp %d,%d) | video %.1f Hz | gioco %.1f fps | CPU emu %.0f%%%s",
+                          g.hres, g.vres, g.disp_x, g.disp_y,
                           videoFrames / fpsAcc, fpsCnt / fpsAcc, 100.0 * cpuAcc / (fpsCnt ? fpsCnt : 1), halted ? " | CPU FERMA" : "");
             cb::renderer::SetWindowTitle(t);
             fpsAcc = 0; fpsCnt = 0; videoFrames = 0; cpuAcc = 0;
