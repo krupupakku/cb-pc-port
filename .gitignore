@@ -1,0 +1,63 @@
+# =============================================================================
+# ROMs, ISOs & Materiale Originale PS1 (NON COMMITTARE MAI PER COPYRIGHT)
+# =============================================================================
+*.bin
+*.cue
+*.iso
+*.img
+*.ccd
+*.sub
+*.chd
+*.pbp
+*.dat
+*.DAT
+*.exe
+*.EXE
+SCUS*
+SCES*
+SCPS*
+
+# Cartelle con file estratti o binari del disco originale
+original/disc/*
+!original/disc/.gitkeep
+original/extracted/*
+!original/extracted/.gitkeep
+
+# Repository esterni clonati (gestiti separatamente o tramite script di setup)
+original/repos/*
+!original/repos/.gitkeep
+
+# =============================================================================
+# Build Artifacts (C / C++ / CMake / Visual Studio)
+# =============================================================================
+build/
+out/
+bin/
+obj/
+*.obj
+*.o
+*.pdb
+*.ilk
+*.exp
+*.lib
+*.dll
+*.so
+*.dylib
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+compile_commands.json
+
+# =============================================================================
+# IDE & OS
+# =============================================================================
+.vs/
+.vscode/
+.idea/
+*.suo
+*.user
+*.sln.docstates
+Thumbs.db
+.DS_Store
+
