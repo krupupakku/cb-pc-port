@@ -3,6 +3,10 @@
 // =============================================================================
 
 #include <cstdio>
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
 #include "core/psyq_shim.h"
 #include "renderer/renderer.h"
 #include "input/input_manager.h"
@@ -25,34 +29,33 @@ int main(int argc, char* argv[]) {
     config.highPolyMode = true;
 
     cb::core::Initialize(config);
-    cb::renderer::Initialize(config.renderWidth, config.renderHeight, config.widescreen);
+    if (!cb::renderer::Initialize(config.renderWidth, config.renderHeight, config.widescreen)) {
+        return 1;
+    }
     cb::input::Initialize();
     cb::audio::Initialize();
     cb::netcode::Initialize();
 
-    // Verifica stato dei 4 controller (XInput / SteamInput)
-    std::printf("\n--- Stato Controller Rilevati (Multitap 4P Virtuale) ---\n");
-    for (int p = 0; p < cb::input::MAX_PLAYERS; ++p) {
-        const auto& ctrl = cb::input::GetController(p);
-        bool connected = (ctrl.flags & cb::input::CB_CTRL_CONNECTED) != 0;
-        std::printf("  Giocatore %d: %s (flags=0x%X)\n",
-            p + 1,
-            connected ? "CONNESSO" : "Non connesso (Slot disponibile per Bot/Remoto)",
-            ctrl.flags);
+    std::printf("\n[Info] Finestra avviata! Usa un controller XInput oppure WASD/Frecce + Z/X/C/V.\n");
+    std::printf("[Info] Premi ESC o chiudi la finestra per terminare.\n");
+
+    uint64_t frameCount = 0;
+    while (cb::renderer::ProcessWindowEvents()) {
+        cb::input::PollControllers();
+
+        // Tick deterministico della logica
+        cb::core::TickGameLogic();
+
+        // Rendering 60 FPS
+        cb::renderer::BeginFrame(frameCount);
+        cb::renderer::SubmitOrderingTable();
+        cb::renderer::EndFrame();
+
+        frameCount++;
+#ifdef _WIN32
+        Sleep(16); // ~60 FPS pacing
+#endif
     }
-
-    // Esecuzione di un ciclo di prova (Tick deterministico + Snapshot Rollback + Render)
-    std::printf("\n--- Test Pipeline Motore ---\n");
-    cb::input::PollControllers();
-    cb::core::TickGameLogic();
-
-    cb::netcode::FrameStateSnapshot snap{};
-    cb::netcode::SaveSnapshot(1, snap);
-    std::printf("[Test] Snapshot frame #1 salvato con successo per Rollback Netcode.\n");
-
-    cb::renderer::BeginFrame();
-    cb::renderer::SubmitOrderingTable();
-    cb::renderer::EndFrame();
 
     std::printf("\nShutdown dei sottosistemi...\n");
     cb::netcode::Shutdown();
@@ -63,4 +66,3 @@ int main(int argc, char* argv[]) {
 
     return 0;
 }
-

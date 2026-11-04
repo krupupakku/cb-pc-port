@@ -9,7 +9,10 @@ if(MSVC)
     add_compile_definitions(_CRT_SECURE_NO_WARNINGS NOMINMAX WIN32_LEAN_AND_MEAN)
     add_compile_options(/W3 /MP)
 else()
-    add_compile_options(-Wall -Wextra)
+    add_compile_definitions(_CRT_SECURE_NO_WARNINGS NOMINMAX WIN32_LEAN_AND_MEAN)
+    add_compile_options(-Wall -Wextra -Wno-ignored-qualifiers -Wno-delete-non-abstract-non-virtual-dtor -Wno-missing-field-initializers)
+    # Link statico della runtime C++ per poter avviare gli .exe con doppio click da Esplora File
+    add_link_options(-static)
 endif()
 
 # =============================================================================
@@ -55,10 +58,10 @@ add_executable(crashbash_remaster
 target_include_directories(crashbash_remaster PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
     "${CMAKE_CURRENT_SOURCE_DIR}/../original/repos/crashbash"
+    "${ORIG_MODEL_TOOL_DIR}/third_party"
 )
 
 if(WIN32)
-    # Link nativo a XInput per il supporto immediato ai 4 controller su Windows
-    target_link_libraries(crashbash_remaster PRIVATE xinput)
+    # Link nativo a XInput, OpenGL e GDI32 per finestra grafica + 4 controller
+    target_link_libraries(crashbash_remaster PRIVATE xinput opengl32 gdi32 user32)
 endif()
-

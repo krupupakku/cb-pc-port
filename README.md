@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="cb.png" alt="Crash Bash Logo" width="420"/>
+</p>
+
 # Crash Bash: Remaster+ (PC Native Port & Recompilation)
 
 Progetto di **ricompilazione nativa per PC** e **Remaster+** di *Crash Bash* (PS1 - Eurocom, 2000).

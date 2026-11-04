@@ -1,26 +1,20 @@
 #pragma once
 // =============================================================================
-// Crash Bash: Remaster+ — Renderer 4K, GTE Float Precision & High-Poly Loader
-// Intercetta la OrderingTable (OT_SIZE = 4096) di gpu.h e le chiamate di disegno
-// dei modelli (.mdl) per renderizzarli in 4K Widescreen senza vertex wobble.
+// Crash Bash: Remaster+ — Renderer 4K, GTE Float Precision & Finestra OpenGL
 // =============================================================================
 
 #include <cstdint>
 
 namespace cb::renderer {
 
-struct RenderStats {
-    uint32_t polysSubmitted = 0;
-    uint32_t highPolySwaps  = 0;
-};
-
-bool Initialize(uint32_t width, uint32_t height, bool widescreen);
+bool Initialize(uint32_t internalWidth, uint32_t internalHeight, bool widescreen);
 void Shutdown();
 
-void BeginFrame();
-// Processa la Ordering Table PS1 o i modelli High-Poly sostitutivi
+// Restituisce false quando l'utente chiude la finestra o preme ESC
+bool ProcessWindowEvents();
+
+void BeginFrame(uint64_t frameCount);
 void SubmitOrderingTable();
 void EndFrame();
 
 } // namespace cb::renderer
-

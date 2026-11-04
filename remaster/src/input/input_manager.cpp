@@ -69,12 +69,32 @@ void PollControllers() {
             // Conversione stick sinistro nell'angolo nativo di Crash Bash (0..4095, 0x1000 = 360°)
             const short lx = state.Gamepad.sThumbLX;
             const short ly = state.Gamepad.sThumbLY;
-            if (std::abs(lx) > XINPUT_GAMEPAD_LEFT_THUMB_DEADZONE ||
-                std::abs(ly) > XINPUT_GAMEPAD_LEFT_THUMB_DEADZONE) {
+            if (std::abs(static_cast<int>(lx)) > XINPUT_GAMEPAD_LEFT_THUMB_DEADZONE ||
+                std::abs(static_cast<int>(ly)) > XINPUT_GAMEPAD_LEFT_THUMB_DEADZONE) {
                 analogActive = true;
                 double rad = std::atan2(static_cast<double>(lx), static_cast<double>(ly));
                 int32_t bashAng = static_cast<int32_t>((rad / (2.0 * 3.14159265358979323846)) * 4096.0);
                 angle = bashAng & 0xFFF;
+            }
+        }
+
+        // Fallback Tastiera su Player 1 per test rapido anche senza pad collegato
+        if (i == 0 && !connected) {
+            uint32_t kbHeld = CB_BTN_NONE;
+            if (GetAsyncKeyState(VK_UP)    & 0x8000 || GetAsyncKeyState('W') & 0x8000) kbHeld |= CB_BTN_UP;
+            if (GetAsyncKeyState(VK_DOWN)  & 0x8000 || GetAsyncKeyState('S') & 0x8000) kbHeld |= CB_BTN_DOWN;
+            if (GetAsyncKeyState(VK_LEFT)  & 0x8000 || GetAsyncKeyState('A') & 0x8000) kbHeld |= CB_BTN_LEFT;
+            if (GetAsyncKeyState(VK_RIGHT) & 0x8000 || GetAsyncKeyState('D') & 0x8000) kbHeld |= CB_BTN_RIGHT;
+            if (GetAsyncKeyState(VK_SPACE) & 0x8000 || GetAsyncKeyState('Z') & 0x8000) kbHeld |= CB_BTN_CROSS;
+            if (GetAsyncKeyState('X')      & 0x8000) kbHeld |= CB_BTN_SQUARE;
+            if (GetAsyncKeyState('C')      & 0x8000) kbHeld |= CB_BTN_CIRCLE;
+            if (GetAsyncKeyState('V')      & 0x8000) kbHeld |= CB_BTN_TRIANGLE;
+            if (GetAsyncKeyState(VK_SHIFT) & 0x8000) kbHeld |= CB_BTN_R1;
+            if (GetAsyncKeyState(VK_RETURN)& 0x8000) kbHeld |= CB_BTN_START;
+
+            if (kbHeld != CB_BTN_NONE) {
+                connected = true;
+                held = kbHeld;
             }
         }
 #endif
@@ -102,4 +122,3 @@ InputBackend GetActiveBackend() {
 }
 
 } // namespace cb::input
-
