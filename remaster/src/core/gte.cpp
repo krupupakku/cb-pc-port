@@ -4,6 +4,8 @@
 // sono semplificati: da rifinire quando serviranno (determinismo netcode).
 #include "core/mips_cpu.h"
 #include <algorithm>
+#include <cstdio>
+#include <map>
 
 namespace cb {
 
@@ -145,7 +147,7 @@ void MipsCpu::gte_op(uint32_t in) {
     case 0x12: g.mvmva(mx, v, cv); break;                                     // MVMVA
     case 0x28: for (int i = 0; i < 3; i++) { int64_t x = gte_d[9 + i]; g.setMAC(1 + i, g.sh(x * x)); g.setIR(1 + i, gte_d[25 + i]); } break; // SQR
     case 0x0C: {                                                              // OP
-        int64_t d1 = lo16(gte_c[0]), d2 = hi16(gte_c[2]), d3 = (int16_t)gte_c[4];
+        int64_t d1 = lo16(gte_c[0]), d2 = lo16(gte_c[2]), d3 = lo16(gte_c[4]);
         int64_t i1 = gte_d[9], i2 = gte_d[10], i3 = gte_d[11];
         g.setMAC(1, g.sh(i3 * d2 - i2 * d3)); g.setMAC(2, g.sh(i1 * d3 - i3 * d1)); g.setMAC(3, g.sh(i2 * d1 - i1 * d2));
         for (int i = 0; i < 3; i++) g.setIR(1 + i, gte_d[25 + i]);
@@ -187,7 +189,11 @@ void MipsCpu::gte_op(uint32_t in) {
         default: break;
         }
         break; }
-    default: break;  // comandi sconosciuti/non usati: ignorati
+    default: {
+        static std::map<int, int> unh;
+        if (unh[cmd]++ < 3) std::printf("[GTE-IGNORATO] cmd=%02X op=%08X @%08X\n", cmd, in, pc - 4);
+        break;
+    }
     }
 }
 

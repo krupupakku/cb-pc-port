@@ -96,10 +96,36 @@ int main(int argc, char** argv) {
 
     // HLE Psy-Q: VSync(mode) @0x800320EC. -1 = leggi contatore frame; 0/n = attendi (qui: avanza di 1)
     static uint32_t vframes = 0;
-    cpu.hooks[0x800320EC] = [](MipsCpu& c) {
+    cpu.hooks[0x800320EC] = [&cpu](MipsCpu& c) {
         int32_t mode = (int32_t)c.r[4];
         if (mode >= 0 && mode != 1) vframes += (mode ? mode : 1);
         c.r[2] = (mode == 1) ? vframes * 263 : vframes;
+
+        // Iniezione input pad per navigare menu fino alla Warp Room
+        uint16_t held = 0;
+        // Premiamo Start / Croce nei momenti chiave
+        if (vframes >= 60 && vframes < 90) held = 0x0008;         // Start
+        else if (vframes >= 120 && vframes < 140) held = 0x4000;  // X (Select Game Type -> Adventure)
+        else if (vframes >= 170 && vframes < 190) held = 0x4000;  // X (1 Player)
+        else if (vframes >= 220 && vframes < 240) held = 0x4000;  // X (Nuova partita)
+        else if (vframes >= 270 && vframes < 290) held = 0x4000;  // X (Scelta personaggio: Crash/Cortex)
+        else if (vframes >= 330 && vframes < 360) held = 0x0008;  // Start (Salta filmato intro)
+        else if (vframes >= 400 && vframes < 430) held = 0x0008;  // Start (Salta dialogo Aku/Uka)
+
+        uint8_t* p1 = cpu.ram_ptr(0x80063A90);
+        uint8_t* p2 = cpu.ram_ptr(0x80063AC4);
+        if (p1) {
+            p1[0] = 0x00; p1[1] = 0x80;
+            for (int k = 0; k < 4; k++) {
+                uint8_t* s = p1 + 2 + k * 8;
+                uint16_t raw = (k == 0) ? (uint16_t)~held : 0xFFFF;
+                s[0] = 0x00; s[1] = 0x41;
+                s[2] = raw & 0xFF; s[3] = raw >> 8;
+                s[4] = s[5] = s[6] = s[7] = 0x80;
+            }
+        }
+        if (p2) p2[0] = 0xFF;
+
         return true;
     };
 
