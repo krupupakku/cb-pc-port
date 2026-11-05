@@ -28,7 +28,11 @@ void Console::dma_write(uint32_t a, uint32_t v) {
         uint32_t sync = (v >> 9) & 3;
         uint32_t words = (bcr & 0xFFFF) * ((bcr >> 16) ? (bcr >> 16) : 1);
         if (ch == 2) {
-            if (sync == 2) gpu.dma_linked_list(cpu.ram.data(), 0x1FFFFC, madr);
+            if (sync == 2) {
+                gpu.dma_linked_list(cpu.ram.data(), 0x1FFFFC, madr);
+                uint32_t end_madr = 0x00FFFFFFu;
+                std::memcpy(hw + hwoff(a - 8), &end_madr, 4);
+            }
             else if (v & 1) gpu.dma_block(cpu.ram.data(), 0x1FFFFC, madr, words);
             else for (uint32_t i = 0; i < words; i++) { uint32_t w = gpu.gpuread(); std::memcpy(&cpu.ram[(madr + i * 4) & 0x1FFFFC], &w, 4); }
         } else if (ch == 4) {   // SPU DMA transfer

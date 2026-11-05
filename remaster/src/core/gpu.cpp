@@ -1,17 +1,115 @@
 #include "core/gpu.h"
 #include <algorithm>
 #include <cmath>
+#include <condition_variable>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <mutex>
+#include <thread>
+#include <vector>
 
 namespace cb {
 
 static inline int sx11(uint32_t v) { return ((int)(v << 21)) >> 21; }
-static inline uint32_t rd32(uint8_t* ram, uint32_t mask, uint32_t a) { uint32_t v; std::memcpy(&v, ram + (a & mask & ~3u), 4); return v; }
+static inline uint32_t rd32(uint8_t* ram, uint32_t mask, uint32_t a) {
+    uint32_t v;
+    std::memcpy(&v, ram + (a & mask & ~3u), 4);
+    return v;
+}
+
+// Thread pool per la rasterizzazione parallela ad alta risoluzione a bande orizzontali
+struct WorkerPool {
+    struct Job {
+        Gpu* gpu = nullptr;
+        int maxH = 0;
+    };
+
+    std::vector<std::thread> workers;
+    std::mutex mtx;
+    std::condition_variable cv_start;
+    std::condition_variable cv_done;
+    Job current_job;
+    int total_threads = 0;
+    int active_workers = 0;
+    int generation = 0;
+    bool stop = false;
+
+    WorkerPool() {
+        int n = (int)std::thread::hardware_concurrency();
+        if (n < 2) n = 2;
+        if (n > 16) n = 16;
+        total_threads = n;
+        workers.reserve(n);
+        for (int i = 0; i < n; i++) {
+            workers.emplace_back([this, i]() {
+                int local_gen = 0;
+                while (true) {
+                    Job job;
+                    {
+                        std::unique_lock<std::mutex> lock(mtx);
+                        cv_start.wait(lock, [this, &local_gen]() {
+                            return stop || generation > local_gen;
+                        });
+                        if (stop) return;
+                        local_gen = generation;
+                        job = current_job;
+                    }
+
+                    int y0 = i * job.maxH / total_threads;
+                    int y1 = (i + 1) * job.maxH / total_threads - 1;
+                    if (y0 <= y1 && job.gpu) {
+                        job.gpu->render_hires_band(i, y0, y1);
+                    }
+
+                    {
+                        std::unique_lock<std::mutex> lock(mtx);
+                        active_workers--;
+                        if (active_workers == 0) {
+                            cv_done.notify_all();
+                        }
+                    }
+                }
+            });
+        }
+    }
+
+    ~WorkerPool() {
+        {
+            std::unique_lock<std::mutex> lock(mtx);
+            stop = true;
+            generation++;
+            cv_start.notify_all();
+        }
+        for (auto& w : workers) {
+            if (w.joinable()) w.join();
+        }
+    }
+
+    void run(Gpu* gpu, int maxH) {
+        {
+            std::unique_lock<std::mutex> lock(mtx);
+            current_job = {gpu, maxH};
+            active_workers = total_threads;
+            generation++;
+            cv_start.notify_all();
+        }
+        {
+            std::unique_lock<std::mutex> lock(mtx);
+            cv_done.wait(lock, [this]() { return active_workers == 0; });
+        }
+    }
+};
+
+static WorkerPool& get_pool() {
+    static WorkerPool pool;
+    return pool;
+}
 
 void Gpu::set_scale(int s) {
     int target = (s >= 2 && s <= 4) ? s : 1;
     if (target == scale && (target == 1 || !hires_vram.empty())) return;
+    flush_hires();
     scale = target;
     if (scale > 1) {
         hires_vram.assign((size_t)(1024 * scale) * (512 * scale), 0xFF000000u);
@@ -32,6 +130,24 @@ void Gpu::set_scale(int s) {
         }
     } else {
         hires_vram.clear();
+    }
+}
+
+void Gpu::flush_hires() {
+    if (hq.empty() || scale <= 1 || hires_vram.empty()) {
+        hq.clear();
+        return;
+    }
+    int maxH = 512 * scale;
+    get_pool().run(this, maxH);
+    hq.clear();
+}
+
+void Gpu::render_hires_band(int thread_id, int by0, int by1) {
+    (void)thread_id;
+    for (const auto& cmd : hq) {
+        if (cmd.ymax < by0 || cmd.ymin > by1) continue;
+        hires_tri(cmd, by0, by1);
     }
 }
 
@@ -66,9 +182,9 @@ uint32_t Gpu::gpuread() {
 void Gpu::gp1(uint32_t w) {
     uint32_t cmd = w >> 24;
     switch (cmd) {
-    case 0x00: fifo.clear(); need = 0; cpu2vram = vram2cpu = false; disp_enabled = false;
+    case 0x00: fifo.clear(); need = 0; polyline = false; cpu2vram = vram2cpu = false; disp_enabled = false;
                tpx = tpy = semi_mode = tex_depth = 0; clip_x0 = clip_y0 = 0; clip_x1 = 1023; clip_y1 = 511; off_x = off_y = 0; break;
-    case 0x01: fifo.clear(); need = 0; break;
+    case 0x01: fifo.clear(); need = 0; polyline = false; break;
     case 0x03: disp_enabled = !(w & 1); break;
     case 0x05: disp_x = w & 0x3FF; disp_y = (w >> 10) & 0x1FF; break;
     case 0x08: {
@@ -101,27 +217,68 @@ void Gpu::gp0(uint32_t w) {
         if (cpos >= cw * ch) cpu2vram = false;
         return;
     }
+
+    // Terminazione polilinea secondo specifica hardware PS1 (0x55555555 / 0x50005000)
+    if (polyline && (w & 0xF000F000) == 0x50005000) {
+        need = 0;
+        fifo.clear();
+        polyline = false;
+        return;
+    }
+
     if (need == 0) {
-        fifo.clear(); fifo.push_back(w);
-        uint32_t cmd = w >> 24; polyline = false;
+        fifo.clear();
+        fifo.push_back(w);
+        uint32_t cmd = w >> 24;
+        polyline = false;
         if (cmd >= 0x20 && cmd < 0x40) {
-            bool quad = cmd & 8, tex = cmd & 4, gour = cmd & 0x10; int n = quad ? 4 : 3;
-            need = 1; for (int i = 0; i < n; i++) { need += 1 + (tex ? 1 : 0) + ((gour && i > 0) ? 1 : 0); }
+            bool quad = cmd & 8, tex = cmd & 4, gour = cmd & 0x10;
+            int n = quad ? 4 : 3;
+            need = 1;
+            for (int i = 0; i < n; i++) {
+                need += 1 + (tex ? 1 : 0) + ((gour && i > 0) ? 1 : 0);
+            }
         } else if (cmd >= 0x40 && cmd < 0x60) {
-            bool gour = cmd & 0x10; polyline = cmd & 8; need = gour ? 4 : 3;
+            bool gour = cmd & 0x10;
+            polyline = (cmd & 8) != 0;
+            need = gour ? 4 : 3;
         } else if (cmd >= 0x60 && cmd < 0x80) {
             need = 2 + ((cmd & 4) ? 1 : 0) + (((cmd >> 3) & 3) == 0 ? 1 : 0);
         } else if (cmd == 0x02) need = 3;
         else if (cmd == 0x80) need = 4;
         else if (cmd == 0xA0 || cmd == 0xC0) need = 3;
         else need = 1;
-        if (need == 1) { exec_command(); need = 0; fifo.clear(); }
+
+        if (need == 1) {
+            exec_command();
+            need = 0;
+            fifo.clear();
+        }
         return;
     }
+
     fifo.push_back(w);
     if (fifo.size() >= need) {
         exec_command();
-        if (!polyline) { need = 0; fifo.clear(); }
+        if (polyline) {
+            uint32_t cmd = fifo[0] >> 24;
+            bool gour = (cmd & 0x10) != 0;
+            if (gour) {
+                // Polilinea Gouraud: fifo = [col0, v0, col1, v1] -> conserva v1, col1 come nuovo inizio
+                fifo[0] = fifo[2];
+                fifo[1] = fifo[3];
+                fifo.resize(2);
+                need = 4;
+            } else {
+                // Polilinea Flat: fifo = [col, v0, v1] -> conserva col e v1 come nuovo inizio
+                fifo[1] = fifo[2];
+                fifo.resize(2);
+                need = 3;
+            }
+        } else {
+            need = 0;
+            fifo.clear();
+        }
     }
 }
 
@@ -130,16 +287,18 @@ void Gpu::exec_command() {
     prim_count++;
     switch (cmd) {
     case 0x00: break;
-    case 0x01: fifo.clear(); need = 0; break;
+    case 0x01: fifo.clear(); need = 0; polyline = false; break;
     case 0x02: fill_rect(); break;
     case 0x80: copy_rect(); break;
     case 0xA0: {
+        flush_hires();
         cx = fifo[1] & 0x3FF; cy = (fifo[1] >> 16) & 0x1FF;
         cw = fifo[2] & 0x3FF; ch = (fifo[2] >> 16) & 0x1FF;
         if (!cw) cw = 1024;
         if (!ch) ch = 512;
         cpos = 0; cpu2vram = true; break; }
     case 0xC0: {
+        flush_hires();
         rx = fifo[1] & 0x3FF; ry = (fifo[1] >> 16) & 0x1FF;
         rw = fifo[2] & 0x3FF; rh = (fifo[2] >> 16) & 0x1FF;
         if (!rw) rw = 1024;
@@ -167,6 +326,7 @@ void Gpu::exec_command() {
 }
 
 void Gpu::fill_rect() {
+    flush_hires();
     uint32_t c = fifo[0]; int r = c & 255, g = (c >> 8) & 255, b = (c >> 16) & 255;
     uint16_t px = (uint16_t)((r >> 3) | ((g >> 3) << 5) | ((b >> 3) << 10));
     int x = fifo[1] & 0x3F0, y = (fifo[1] >> 16) & 0x1FF;
@@ -189,6 +349,7 @@ void Gpu::fill_rect() {
 }
 
 void Gpu::copy_rect() {
+    flush_hires();
     int sx = fifo[1] & 0x3FF, sy = (fifo[1] >> 16) & 0x1FF, dx = fifo[2] & 0x3FF, dy = (fifo[2] >> 16) & 0x1FF;
     int w = fifo[3] & 0x3FF, h = (fifo[3] >> 16) & 0x1FF; if (!w) w = 1024; if (!h) h = 512;
     std::vector<uint16_t> tmp((size_t)w * h);
@@ -238,7 +399,7 @@ static inline uint32_t blend_px(uint32_t dst, int r, int g, int b, int smode) {
 
 void Gpu::put_pixel_hires(int x, int y, int r, int g, int b, bool semi, int smode, bool texsemi) {
     int maxW = 1024 * scale, maxH = 512 * scale;
-    if (x < clip_x0 * scale || x > clip_x1 * scale || y < clip_y0 * scale || y > clip_y1 * scale ||
+    if (x < clip_x0 * scale || x > (clip_x1 + 1) * scale - 1 || y < clip_y0 * scale || y > (clip_y1 + 1) * scale - 1 ||
         x < 0 || x >= maxW || y < 0 || y >= maxH) return;
 
     uint32_t& dst = hires_vram[(size_t)y * maxW + x];
@@ -297,11 +458,10 @@ struct TexSampler {
     }
 };
 
-void Gpu::raster_tri_hires(const V& a0, const V& b0, const V& d0, bool gouraud, bool textured, bool semi, bool raw,
-                           uint16_t clut, int ctpx, int ctpy, int cdepth, int csemi) {
+void Gpu::hires_tri(const HCmd& cmd, int by0, int by1) {
     const int s = scale;
-    const int maxW = 1024 * s, maxH = 512 * s;
-    V a = a0, b = b0, d = d0;
+    const int maxW = 1024 * s;
+    V a = cmd.v[0], b = cmd.v[1], d = cmd.v[2];
     a.x *= s; a.y *= s;
     b.x *= s; b.y *= s;
     d.x *= s; d.y *= s;
@@ -310,10 +470,10 @@ void Gpu::raster_tri_hires(const V& a0, const V& b0, const V& d0, bool gouraud, 
     if (area == 0) return;
     if (area < 0) { std::swap(b, d); area = -area; }
 
-    int minx = std::max({std::min({a.x, b.x, d.x}), clip_x0 * s, 0});
-    int maxx = std::min({std::max({a.x, b.x, d.x}), (clip_x1 + 1) * s - 1, maxW - 1});
-    int miny = std::max({std::min({a.y, b.y, d.y}), clip_y0 * s, 0});
-    int maxy = std::min({std::max({a.y, b.y, d.y}), (clip_y1 + 1) * s - 1, maxH - 1});
+    int minx = std::max({std::min({a.x, b.x, d.x}), cmd.cx0 * s, 0});
+    int maxx = std::min({std::max({a.x, b.x, d.x}), (cmd.cx1 + 1) * s - 1, maxW - 1});
+    int miny = std::max({std::min({a.y, b.y, d.y}), cmd.cy0 * s, by0});
+    int maxy = std::min({std::max({a.y, b.y, d.y}), (cmd.cy1 + 1) * s - 1, by1});
     if (minx > maxx || miny > maxy) return;
 
     auto bias = [](const V& p, const V& q) {
@@ -323,135 +483,70 @@ void Gpu::raster_tri_hires(const V& a0, const V& b0, const V& d0, bool gouraud, 
     const int b2b = bias(a, b), b0b = bias(b, d), b1b = bias(d, a);
     const long long dx2 = -(long long)(b.y - a.y), dx0 = -(long long)(d.y - b.y), dx1 = -(long long)(a.y - d.y);
     const float invArea = 1.0f / (float)area;
-    const TexSampler ts(vram.data(), clut, ctpx, ctpy, cdepth, bilinear_tex);
+    const TexSampler ts(vram.data(), cmd.clut, cmd.ctpx, cmd.ctpy, cmd.cdepth, bilinear_tex);
     uint32_t* out = hires_vram.data();
-
-    // Derivate spaziali costanti per tutta la superficie del triangolo (DDA)
-    const float y_bd = (float)(b.y - d.y), y_da = (float)(d.y - a.y), y_ab = (float)(a.y - b.y);
-    float du_dx = 0.0f, dv_dx = 0.0f;
-    if (textured) {
-        du_dx = ((float)a.u * y_bd + (float)b.u * y_da + (float)d.u * y_ab) * invArea;
-        dv_dx = ((float)a.v * y_bd + (float)b.v * y_da + (float)d.v * y_ab) * invArea;
-    }
-
-    float dr_dx = 0.0f, dg_dx = 0.0f, db_dx = 0.0f;
-    if (gouraud) {
-        dr_dx = ((float)a.r * y_bd + (float)b.r * y_da + (float)d.r * y_ab) * invArea;
-        dg_dx = ((float)a.g * y_bd + (float)b.g * y_da + (float)d.g * y_ab) * invArea;
-        db_dx = ((float)a.b * y_bd + (float)b.b * y_da + (float)d.b * y_ab) * invArea;
-    }
 
     for (int y = miny; y <= maxy; y++) {
         long long w2 = (long long)(b.x - a.x) * (y - a.y) - (long long)(b.y - a.y) * (minx - a.x);
         long long w0 = (long long)(d.x - b.x) * (y - b.y) - (long long)(d.y - b.y) * (minx - b.x);
         long long w1 = (long long)(a.x - d.x) * (y - d.y) - (long long)(a.y - d.y) * (minx - d.x);
 
-        float fa = (float)w0 * invArea, fb = (float)w1 * invArea, fc = (float)w2 * invArea;
-        bool entered = false;
         uint32_t* row = out + (size_t)y * maxW;
+        bool entered = false;
 
-        if (!textured) {
-            if (!gouraud) {
-                uint32_t col = 0xFF000000u | ((uint32_t)a.b << 16) | ((uint32_t)a.g << 8) | (uint32_t)a.r;
-                for (int x = minx; x <= maxx; x++, w2 += dx2, w0 += dx0, w1 += dx1) {
-                    if (w2 + b2b < 0 || w0 + b0b < 0 || w1 + b1b < 0) { if (entered) break; continue; }
-                    entered = true;
-                    if (semi) row[x] = blend_px(row[x], a.r, a.g, a.b, csemi);
-                    else row[x] = col;
-                }
-            } else {
-                float cur_r = (float)a.r * fa + (float)b.r * fb + (float)d.r * fc;
-                float cur_g = (float)a.g * fa + (float)b.g * fb + (float)d.g * fc;
-                float cur_b = (float)a.b * fa + (float)b.b * fb + (float)d.b * fc;
-                for (int x = minx; x <= maxx; x++, w2 += dx2, w0 += dx0, w1 += dx1,
-                                                   cur_r += dr_dx, cur_g += dg_dx, cur_b += db_dx) {
-                    if (w2 + b2b < 0 || w0 + b0b < 0 || w1 + b1b < 0) { if (entered) break; continue; }
-                    entered = true;
-                    int r = std::clamp((int)cur_r, 0, 255);
-                    int g = std::clamp((int)cur_g, 0, 255);
-                    int bl = std::clamp((int)cur_b, 0, 255);
-                    if (semi) row[x] = blend_px(row[x], r, g, bl, csemi);
-                    else row[x] = 0xFF000000u | ((uint32_t)bl << 16) | ((uint32_t)g << 8) | (uint32_t)r;
-                }
+        for (int x = minx; x <= maxx; x++, w2 += dx2, w0 += dx0, w1 += dx1) {
+            if (w2 + b2b < 0 || w0 + b0b < 0 || w1 + b1b < 0) {
+                if (entered) break;
+                continue;
             }
-            continue;
-        }
+            entered = true;
 
-        // Triangolo texturato (DDA incremental stepping)
-        float cur_u = (float)a.u * fa + (float)b.u * fb + (float)d.u * fc;
-        float cur_v = (float)a.v * fa + (float)b.v * fb + (float)d.v * fc;
-        float cur_r = 0.0f, cur_g = 0.0f, cur_b = 0.0f;
-        if (gouraud) {
-            cur_r = (float)a.r * fa + (float)b.r * fb + (float)d.r * fc;
-            cur_g = (float)a.g * fa + (float)b.g * fb + (float)d.g * fc;
-            cur_b = (float)a.b * fa + (float)b.b * fb + (float)d.b * fc;
-        }
+            float fa = (float)w0 * invArea, fb = (float)w1 * invArea, fc = (float)w2 * invArea;
+            int r, g, bl;
+            if (cmd.gouraud) {
+                r = std::clamp((int)(a.r * fa + b.r * fb + d.r * fc + 0.5f), 0, 255);
+                g = std::clamp((int)(a.g * fa + b.g * fb + d.g * fc + 0.5f), 0, 255);
+                bl = std::clamp((int)(a.b * fa + b.b * fb + d.b * fc + 0.5f), 0, 255);
+            } else {
+                r = a.r; g = a.g; bl = a.b;
+            }
 
-        if (ts.bilinear) {
-            for (int x = minx; x <= maxx; x++, w2 += dx2, w0 += dx0, w1 += dx1,
-                                               cur_u += du_dx, cur_v += dv_dx,
-                                               cur_r += dr_dx, cur_g += dg_dx, cur_b += db_dx) {
-                if (w2 + b2b < 0 || w0 + b0b < 0 || w1 + b1b < 0) { if (entered) break; continue; }
-                entered = true;
-                float uf = cur_u, vf = cur_v;
-                int u0 = (int)uf; if (uf < 0.0f) u0 = (int)std::floor(uf);
-                int v0 = (int)vf; if (vf < 0.0f) v0 = (int)std::floor(vf);
-                uint16_t t = ts.texel(u0, v0);
-                if (t == 0) continue;
-                int fu = (int)((uf - (float)u0) * 256.0f), fv = (int)((vf - (float)v0) * 256.0f);
-                uint16_t t10 = ts.texel(u0 + 1, v0), t01 = ts.texel(u0, v0 + 1), t11 = ts.texel(u0 + 1, v0 + 1);
-                if (t10 == 0) t10 = t; if (t01 == 0) t01 = t; if (t11 == 0) t11 = t;
+            bool texsemi = true;
+            if (cmd.textured) {
+                float uf = (float)a.u * fa + (float)b.u * fb + (float)d.u * fc;
+                float vf = (float)a.v * fa + (float)b.v * fb + (float)d.v * fc;
                 int tr, tg, tb;
-                if (t10 == t && t01 == t && t11 == t) {
-                    tr = (t & 31) << 3; tg = ((t >> 5) & 31) << 3; tb = ((t >> 10) & 31) << 3;
-                } else {
+                uint16_t t;
+                if (ts.bilinear) {
+                    int u0 = (int)std::floor(uf), v0 = (int)std::floor(vf);
+                    t = ts.texel(u0, v0);
+                    if (t == 0) continue;
+                    int fu = (int)((uf - (float)u0) * 256.0f), fv = (int)((vf - (float)v0) * 256.0f);
+                    uint16_t t10 = ts.texel(u0 + 1, v0), t01 = ts.texel(u0, v0 + 1), t11 = ts.texel(u0 + 1, v0 + 1);
+                    if (t10 == 0) t10 = t;
+                    if (t01 == 0) t01 = t;
+                    if (t11 == 0) t11 = t;
                     int w00 = (256 - fu) * (256 - fv), w10 = fu * (256 - fv), w01 = (256 - fu) * fv, w11 = fu * fv;
                     tr = (((t & 31) * w00 + (t10 & 31) * w10 + (t01 & 31) * w01 + (t11 & 31) * w11) >> 13);
                     tg = ((((t >> 5) & 31) * w00 + ((t10 >> 5) & 31) * w10 + ((t01 >> 5) & 31) * w01 + ((t11 >> 5) & 31) * w11) >> 13);
                     tb = ((((t >> 10) & 31) * w00 + ((t10 >> 10) & 31) * w10 + ((t01 >> 10) & 31) * w01 + ((t11 >> 10) & 31) * w11) >> 13);
-                }
-                int pr, pg, pbl;
-                if (raw) {
-                    pr = tr; pg = tg; pbl = tb;
                 } else {
-                    int mr = gouraud ? (int)cur_r : a.r;
-                    int mg = gouraud ? (int)cur_g : a.g;
-                    int mb = gouraud ? (int)cur_b : a.b;
-                    pr = std::min(255, (tr * mr) >> 7);
-                    pg = std::min(255, (tg * mg) >> 7);
-                    pbl = std::min(255, (tb * mb) >> 7);
+                    int u0 = (int)std::floor(uf), v0 = (int)std::floor(vf);
+                    t = ts.texel(u0, v0);
+                    if (t == 0) continue;
+                    tr = (t & 31) << 3; tg = ((t >> 5) & 31) << 3; tb = ((t >> 10) & 31) << 3;
                 }
-                bool texsemi = (t & 0x8000) != 0;
-                if (semi && texsemi) row[x] = blend_px(row[x], pr, pg, pbl, csemi);
-                else row[x] = 0xFF000000u | ((uint32_t)pbl << 16) | ((uint32_t)pg << 8) | (uint32_t)pr;
-            }
-        } else {
-            // Retro Point sampling veloce (default PS1 autentico)
-            for (int x = minx; x <= maxx; x++, w2 += dx2, w0 += dx0, w1 += dx1,
-                                               cur_u += du_dx, cur_v += dv_dx,
-                                               cur_r += dr_dx, cur_g += dg_dx, cur_b += db_dx) {
-                if (w2 + b2b < 0 || w0 + b0b < 0 || w1 + b1b < 0) { if (entered) break; continue; }
-                entered = true;
-                int u0 = (int)cur_u; if (cur_u < 0.0f) u0 = (int)std::floor(cur_u);
-                int v0 = (int)cur_v; if (cur_v < 0.0f) v0 = (int)std::floor(cur_v);
-                uint16_t t = ts.texel(u0, v0);
-                if (t == 0) continue;
-                int tr = (t & 31) << 3, tg = ((t >> 5) & 31) << 3, tb = ((t >> 10) & 31) << 3;
-                int pr, pg, pbl;
-                if (raw) {
-                    pr = tr; pg = tg; pbl = tb;
-                } else {
-                    int mr = gouraud ? (int)cur_r : a.r;
-                    int mg = gouraud ? (int)cur_g : a.g;
-                    int mb = gouraud ? (int)cur_b : a.b;
-                    pr = std::min(255, (tr * mr) >> 7);
-                    pg = std::min(255, (tg * mg) >> 7);
-                    pbl = std::min(255, (tb * mb) >> 7);
+                if (!cmd.raw) {
+                    tr = std::clamp((tr * r) >> 7, 0, 255);
+                    tg = std::clamp((tg * g) >> 7, 0, 255);
+                    tb = std::clamp((tb * bl) >> 7, 0, 255);
                 }
-                bool texsemi = (t & 0x8000) != 0;
-                if (semi && texsemi) row[x] = blend_px(row[x], pr, pg, pbl, csemi);
-                else row[x] = 0xFF000000u | ((uint32_t)pbl << 16) | ((uint32_t)pg << 8) | (uint32_t)pr;
+                r = tr; g = tg; bl = tb;
+                texsemi = (t & 0x8000) != 0;
             }
+
+            if (cmd.semi && texsemi) row[x] = blend_px(row[x], r, g, bl, cmd.csemi);
+            else row[x] = 0xFF000000u | ((uint32_t)bl << 16) | ((uint32_t)g << 8) | (uint32_t)r;
         }
     }
 }
@@ -477,7 +572,8 @@ void Gpu::raster_tri(const V& a0, const V& b0, const V& c0, bool gouraud, bool t
         else { r = a.r; g = a.g; bl = a.b; }
         bool texsemi = true;
         if (textured) {
-            int u = (int)(a.u * fa + b.u * fb + c.u * fc + 0.5f), v = (int)(a.v * fa + b.v * fb + c.v * fc + 0.5f);
+            int u = (int)std::floor(a.u * fa + b.u * fb + c.u * fc);
+            int v = (int)std::floor(a.v * fa + b.v * fb + c.v * fc);
             uint16_t t = fetch_tex(u, v, clut, ctpx, ctpy, cdepth);
             if (t == 0) continue;
             int tr = (t & 31) << 3, tg = ((t >> 5) & 31) << 3, tb = ((t >> 10) & 31) << 3;
@@ -486,6 +582,32 @@ void Gpu::raster_tri(const V& a0, const V& b0, const V& c0, bool gouraud, bool t
         }
         put_pixel(x, y, std::clamp(r, 0, 255), std::clamp(g, 0, 255), std::clamp(bl, 0, 255), semi, csemi, textured ? texsemi : true);
     }
+}
+
+void Gpu::queue_hires_tri(const V& a, const V& b, const V& d, bool gouraud, bool textured, bool semi, bool raw,
+                          uint16_t clut, int ctpx, int ctpy, int cdepth, int csemi) {
+    HCmd cmd;
+    cmd.gouraud = gouraud;
+    cmd.textured = textured;
+    cmd.semi = semi;
+    cmd.raw = raw;
+    cmd.clut = clut;
+    cmd.ctpx = ctpx;
+    cmd.ctpy = ctpy;
+    cmd.cdepth = cdepth;
+    cmd.csemi = csemi;
+    cmd.cx0 = clip_x0;
+    cmd.cy0 = clip_y0;
+    cmd.cx1 = clip_x1;
+    cmd.cy1 = clip_y1;
+    cmd.v[0] = a;
+    cmd.v[1] = b;
+    cmd.v[2] = d;
+    int ymin = std::min({a.y, b.y, d.y}) * scale;
+    int ymax = std::max({a.y, b.y, d.y}) * scale;
+    cmd.ymin = std::max(ymin, clip_y0 * scale);
+    cmd.ymax = std::min(ymax, (clip_y1 + 1) * scale - 1);
+    hq.push_back(cmd);
 }
 
 void Gpu::draw_poly(bool quad, bool gouraud, bool textured, bool semi, bool raw) {
@@ -500,19 +622,25 @@ void Gpu::draw_poly(bool quad, bool gouraud, bool textured, bool semi, bool raw)
         if (textured) {
             uint32_t uv = fifo[idx++]; v[i].u = uv & 255; v[i].v = (uv >> 8) & 255;
             if (i == 0) clut = (uint16_t)(uv >> 16);
-            if (i == 1) { uint32_t tp = uv >> 16; ctpx = tp & 15; ctpy = (tp >> 4) & 1; csemi = (tp >> 5) & 3; cdepth = (tp >> 7) & 3;
-                          tpx = ctpx; tpy = ctpy; semi_mode = csemi; tex_depth = cdepth; }
+            if (i == 1) { uint32_t tp = uv >> 16; ctpx = tp & 15; ctpy = (tp >> 4) & 1; csemi = (tp >> 5) & 3; cdepth = (tp >> 7) & 3; }
         }
     }
+
+    // 1. Render immediato su VRAM nativa PS1 (per compatibilita deterministica con CPU/DMA)
     raster_tri(v[0], v[1], v[2], gouraud, textured, semi, raw, clut, ctpx, ctpy, cdepth, csemi);
     if (quad) raster_tri(v[1], v[2], v[3], gouraud, textured, semi, raw, clut, ctpx, ctpy, cdepth, csemi);
+
+    // 2. Coda multithread per render Remaster+ ad alta risoluzione
     if (scale > 1 && !hires_vram.empty()) {
-        raster_tri_hires(v[0], v[1], v[2], gouraud, textured, semi, raw, clut, ctpx, ctpy, cdepth, csemi);
-        if (quad) raster_tri_hires(v[1], v[2], v[3], gouraud, textured, semi, raw, clut, ctpx, ctpy, cdepth, csemi);
+        queue_hires_tri(v[0], v[1], v[2], gouraud, textured, semi, raw, clut, ctpx, ctpy, cdepth, csemi);
+        if (quad) queue_hires_tri(v[1], v[2], v[3], gouraud, textured, semi, raw, clut, ctpx, ctpy, cdepth, csemi);
     }
 }
 
 void Gpu::draw_rect(int sizeMode, bool textured, bool semi, bool raw) {
+    // Sincronizza prima i poligoni 3D sottostanti per preservare l'esatto ordine z/OT
+    flush_hires();
+
     uint32_t col = fifo[0]; int r = col & 255, g = (col >> 8) & 255, b = (col >> 16) & 255;
     uint32_t vw = fifo[1]; int x = sx11(vw & 0x7FF) + off_x, y = sx11((vw >> 16) & 0x7FF) + off_y;
     int i = 2; int u0 = 0, v0 = 0; uint16_t clut = 0;
@@ -520,20 +648,23 @@ void Gpu::draw_rect(int sizeMode, bool textured, bool semi, bool raw) {
     int w, h;
     if (sizeMode == 0) { uint32_t s = fifo[i++]; w = s & 0x3FF; h = (s >> 16) & 0x1FF; }
     else if (sizeMode == 1) w = h = 1; else if (sizeMode == 2) w = h = 8; else w = h = 16;
-    for (int j = 0; j < h; j++) for (int k = 0; k < w; k++) {
-        int pr = r, pg = g, pb = b; bool texsemi = true;
-        if (textured) {
-            uint16_t t = fetch_tex(u0 + k, v0 + j, clut, tpx, tpy, tex_depth);
-            if (t == 0) continue;
-            int tr = (t & 31) << 3, tg = ((t >> 5) & 31) << 3, tb = ((t >> 10) & 31) << 3;
-            if (!raw) { tr = std::min(255, (tr * r) >> 7); tg = std::min(255, (tg * g) >> 7); tb = std::min(255, (tb * b) >> 7); }
-            pr = tr; pg = tg; pb = tb; texsemi = (t & 0x8000) != 0;
-        }
-        put_pixel(x + k, y + j, pr, pg, pb, semi, semi_mode, texsemi);
-        if (scale > 1 && !hires_vram.empty()) {
-            for (int dy = 0; dy < scale; dy++) {
-                for (int dx = 0; dx < scale; dx++) {
-                    put_pixel_hires((x + k) * scale + dx, (y + j) * scale + dy, pr, pg, pb, semi, semi_mode, texsemi);
+
+    for (int j = 0; j < h; j++) {
+        for (int k = 0; k < w; k++) {
+            int pr = r, pg = g, pb = b; bool texsemi = true;
+            if (textured) {
+                uint16_t t = fetch_tex(u0 + k, v0 + j, clut, tpx, tpy, tex_depth);
+                if (t == 0) continue; // Trasparente (pixel 0 skip)
+                int tr = (t & 31) << 3, tg = ((t >> 5) & 31) << 3, tb = ((t >> 10) & 31) << 3;
+                if (!raw) { tr = std::min(255, (tr * r) >> 7); tg = std::min(255, (tg * g) >> 7); tb = std::min(255, (tb * b) >> 7); }
+                pr = tr; pg = tg; pb = tb; texsemi = (t & 0x8000) != 0;
+            }
+            put_pixel(x + k, y + j, pr, pg, pb, semi, semi_mode, texsemi);
+            if (scale > 1 && !hires_vram.empty()) {
+                for (int dy = 0; dy < scale; dy++) {
+                    for (int dx = 0; dx < scale; dx++) {
+                        put_pixel_hires((x + k) * scale + dx, (y + j) * scale + dy, pr, pg, pb, semi, semi_mode, texsemi);
+                    }
                 }
             }
         }
@@ -541,28 +672,35 @@ void Gpu::draw_rect(int sizeMode, bool textured, bool semi, bool raw) {
 }
 
 void Gpu::draw_line(bool gouraud, bool semi) {
-    size_t i = 1; uint32_t c0 = fifo[0];
-    auto vtx = [&](uint32_t w, int& x, int& y) { x = sx11(w & 0x7FF) + off_x; y = sx11((w >> 16) & 0x7FF) + off_y; };
-    int x0, y0; vtx(fifo[i++], x0, y0); uint32_t col0 = c0;
-    while (i < fifo.size()) {
-        uint32_t col1 = col0; if (gouraud) col1 = fifo[i++];
-        if (i >= fifo.size()) break;
-        int x1, y1; vtx(fifo[i++], x1, y1);
-        int dx = std::abs(x1 - x0), dy = std::abs(y1 - y0), steps = std::max(dx, dy);
-        for (int s = 0; s <= steps; s++) {
-            float t = steps ? (float)s / steps : 0;
-            int x = x0 + (int)((x1 - x0) * t + (x1 >= x0 ? 0.5f : -0.5f)), y = y0 + (int)((y1 - y0) * t + (y1 >= y0 ? 0.5f : -0.5f));
-            int r = (int)((col0 & 255) * (1 - t) + (col1 & 255) * t), g = (int)(((col0 >> 8) & 255) * (1 - t) + ((col1 >> 8) & 255) * t), b = (int)(((col0 >> 16) & 255) * (1 - t) + ((col1 >> 16) & 255) * t);
-            put_pixel(x, y, r, g, b, semi, semi_mode, true);
-            if (scale > 1 && !hires_vram.empty()) {
-                for (int dy = 0; dy < scale; dy++) {
-                    for (int dx = 0; dx < scale; dx++) {
-                        put_pixel_hires(x * scale + dx, y * scale + dy, r, g, b, semi, semi_mode, true);
-                    }
+    flush_hires();
+    if (fifo.size() < (gouraud ? 4u : 3u)) return;
+    auto vtx = [&](uint32_t w, int& x, int& y) {
+        x = sx11(w & 0x7FF) + off_x;
+        y = sx11((w >> 16) & 0x7FF) + off_y;
+    };
+    uint32_t col0 = fifo[0];
+    int x0, y0;
+    vtx(fifo[1], x0, y0);
+    uint32_t col1 = gouraud ? fifo[2] : col0;
+    int x1, y1;
+    vtx(gouraud ? fifo[3] : fifo[2], x1, y1);
+
+    int dx = std::abs(x1 - x0), dy = std::abs(y1 - y0), steps = std::max(dx, dy);
+    for (int s = 0; s <= steps; s++) {
+        float t = steps ? (float)s / steps : 0;
+        int x = x0 + (int)((x1 - x0) * t + (x1 >= x0 ? 0.5f : -0.5f));
+        int y = y0 + (int)((y1 - y0) * t + (y1 >= y0 ? 0.5f : -0.5f));
+        int r = (int)((col0 & 255) * (1 - t) + (col1 & 255) * t);
+        int g = (int)(((col0 >> 8) & 255) * (1 - t) + (((col1 >> 8) & 255) * t));
+        int b = (int)(((col0 >> 16) & 255) * (1 - t) + (((col1 >> 16) & 255) * t));
+        put_pixel(x, y, r, g, b, semi, semi_mode, true);
+        if (scale > 1 && !hires_vram.empty()) {
+            for (int dy = 0; dy < scale; dy++) {
+                for (int dx = 0; dx < scale; dx++) {
+                    put_pixel_hires(x * scale + dx, y * scale + dy, r, g, b, semi, semi_mode, true);
                 }
             }
         }
-        x0 = x1; y0 = y1; col0 = col1;
     }
 }
 
@@ -572,14 +710,24 @@ void Gpu::dma_linked_list(uint8_t* ram, uint32_t mask, uint32_t addr) {
         uint32_t hdr = rd32(ram, mask, node);
         uint32_t cnt = hdr >> 24;
         for (uint32_t i = 0; i < cnt; i++) gp0(rd32(ram, mask, node + 4 + i * 4));
+        if (polyline) {
+            need = 0;
+            fifo.clear();
+            polyline = false;
+        }
         uint32_t next = hdr & 0xFFFFFF;
-        if (next == 0xFFFFFF) break;
+        if (next == 0xFFFFFF || (next & 0x800000) != 0 || next == 0x00FFFFFF) break;
         node = next & mask & ~3u;
     }
 }
 
 void Gpu::dma_block(uint8_t* ram, uint32_t mask, uint32_t addr, uint32_t words) {
     for (uint32_t i = 0; i < words; i++) gp0(rd32(ram, mask, addr + i * 4));
+    if (polyline) {
+        need = 0;
+        fifo.clear();
+        polyline = false;
+    }
 }
 
 } // namespace cb

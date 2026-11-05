@@ -180,6 +180,7 @@ int main(int argc, char** argv) {
         else if (vframes >= 270 && vframes < 290) held = 0x4000;  // X (Scelta personaggio: Crash/Cortex)
         else if (vframes >= 330 && vframes < 360) held = 0x0008;  // Start (Salta filmato intro)
         else if (vframes >= 400 && vframes < 430) held = 0x0008;  // Start (Salta dialogo Aku/Uka)
+        else if (vframes >= 500 && vframes < 530) held = 0x0008;  // Start (Apri Menu di Pausa nella Warp Room)
 
         uint8_t* p1 = cpu.ram_ptr(0x80063A90);
         uint8_t* p2 = cpu.ram_ptr(0x80063AC4);
@@ -256,7 +257,7 @@ int main(int argc, char** argv) {
     dump_bmp("build/vram_full.bmp", gpu.vram, 0, 0, 1024, 512);
     dump_bmp("build/display.bmp", gpu.vram, gpu.disp_x, gpu.disp_y, gpu.hres, gpu.vres);
     dump_wav("build/audio_test.wav", recorded_audio, 44100);
-    std::printf("GPU: %llu primitive, display %d,%d %dx%d en=%d\n", (unsigned long long)gpu.prim_count, gpu.disp_x, gpu.disp_y, gpu.hres, gpu.vres, gpu.disp_enabled);
+    std::printf("GPU: %llu primitive, display %d,%d %dx%d en=%d, vframes=%u\n", (unsigned long long)gpu.prim_count, gpu.disp_x, gpu.disp_y, gpu.hres, gpu.vres, gpu.disp_enabled, vframes);
     std::printf("\nstop dopo %llu istruzioni, pc=%08X ra=%08X\n", (unsigned long long)cpu.instr_count, cpu.pc, cpu.r[31]);
     if (cpu.halted) std::printf("HALT: %s\n", cpu.halt_reason.c_str());
 

@@ -30,7 +30,8 @@ struct Gpu {
     std::vector<uint32_t> hires_vram;
 
     void set_scale(int s);
-    void flush_hires() {} // Mantieni per compatibilita' con il loop principale
+    void flush_hires();
+    void render_hires_band(int thread_id, int by0, int by1);
 
     void gp0(uint32_t w);
     void gp1(uint32_t w);
@@ -48,12 +49,24 @@ private:
     void draw_line(bool gouraud, bool semi);
     void fill_rect();
     void copy_rect();
+
     struct V { int x, y; int r, g, b; int u, v; };
     void raster_tri(const V& a, const V& b, const V& c, bool gouraud, bool textured, bool semi, bool raw, uint16_t clut, int ctpx, int ctpy, int cdepth, int csemi);
-    void raster_tri_hires(const V& a, const V& b, const V& c, bool gouraud, bool textured, bool semi, bool raw, uint16_t clut, int ctpx, int ctpy, int cdepth, int csemi);
     uint16_t fetch_tex(int u, int v, uint16_t clut, int px, int py, int depth);
     void put_pixel(int x, int y, int r, int g, int b, bool semi, int smode, bool texsemi);
     void put_pixel_hires(int x, int y, int r, int g, int b, bool semi, int smode, bool texsemi);
+
+    struct HCmd {
+        bool gouraud = false, textured = false, semi = false, raw = false;
+        uint16_t clut = 0; int ctpx = 0, ctpy = 0, cdepth = 0, csemi = 0;
+        int cx0 = 0, cy0 = 0, cx1 = 0, cy1 = 0;
+        V v[3];
+        int ymin = 0, ymax = 0;
+    };
+    std::vector<HCmd> hq;
+    void queue_hires_tri(const V& a, const V& b, const V& d, bool gouraud, bool textured, bool semi, bool raw,
+                         uint16_t clut, int ctpx, int ctpy, int cdepth, int csemi);
+    void hires_tri(const HCmd& cmd, int by0, int by1);
 
     std::vector<uint32_t> fifo;
     size_t need = 0;
