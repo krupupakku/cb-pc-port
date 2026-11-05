@@ -106,7 +106,12 @@ int main(int argc, char** argv) {
                 uint32_t sync = (v >> 9) & 3;
                 uint32_t words = (bcr & 0xFFFF) * (bcr >> 16 ? bcr >> 16 : 1);
                 if (ch == 2) {
-                    if (sync == 2) gpu.dma_linked_list(cpu.ram.data(), 0x1FFFFC, madr);
+                    if (sync == 2) {
+                        if (vframes >= 1850) {
+                            std::printf("[DMA LL @vframe=%u] madr=%08X words=%u\n", vframes, madr, words);
+                        }
+                        gpu.dma_linked_list(cpu.ram.data(), 0x1FFFFC, madr);
+                    }
                     else if (v & 1) gpu.dma_block(cpu.ram.data(), 0x1FFFFC, madr, words);
                     else {
                         for (uint32_t i = 0; i < words; i++) { uint32_t w = gpu.gpuread(); std::memcpy(&cpu.ram[(madr + i * 4) & 0x1FFFFC], &w, 4); }
@@ -172,16 +177,14 @@ int main(int argc, char** argv) {
 
         // Iniezione input pad per navigare menu fino alla Warp Room
         uint16_t held = 0;
-        // Premiamo Start / Croce nei momenti chiave
-        if (vframes >= 60 && vframes < 90) held = 0x0008;         // Start
-        else if (vframes >= 120 && vframes < 140) held = 0x4000;  // X (Select Game Type -> Adventure)
-        else if (vframes >= 170 && vframes < 190) held = 0x4000;  // X (1 Player)
-        else if (vframes >= 220 && vframes < 240) held = 0x4000;  // X (Nuova partita)
-        else if (vframes >= 270 && vframes < 290) held = 0x4000;  // X (Scelta personaggio: Crash/Cortex)
-        else if (vframes >= 330 && vframes < 360) held = 0x0008;  // Start (Salta filmato intro)
-        else if (vframes >= 400 && vframes < 430) held = 0x0008;  // Start (Salta dialogo Aku/Uka)
-        else if (vframes >= 500 && vframes < 1000) held = 0x1000;  // D-Pad UP: Cammina verso il portale!
-        else if (vframes >= 1020 && vframes < 1040) held = 0x0008; // Start: PAUSA!
+        // Premi Start e X a intervalli per saltare intro e confermare i menu
+        if (vframes < 1100) {
+            if ((vframes % 40) < 15) held = 0x0008;
+        } else if (vframes >= 1100 && vframes < 1800) {
+            if ((vframes % 40) < 15) held = 0x4000;
+        } else if (vframes >= 1820 && vframes < 1850) {
+            held = 0x0008; // START -> METTE IN PAUSA NELLA WARP ROOM!
+        }
 
         uint8_t* p1 = cpu.ram_ptr(0x80063A90);
         uint8_t* p2 = cpu.ram_ptr(0x80063AC4);
@@ -254,7 +257,96 @@ int main(int argc, char** argv) {
     // ring buffer degli ultimi PC
     std::map<uint32_t, uint64_t> hist;
     int font_poly_count = 0;
+    int draw_text_calls = 0;
+    uint32_t last_ot0_val = 0;
     while (!cpu.halted && cpu.instr_count < maxi) {
+        if (vframes >= 1860) break;
+        if (vframes >= 1850 && vframes <= 1856) {
+            if (cpu.pc == 0x80080998) {
+                static bool dumped2 = false;
+                if (!dumped2) {
+                    dumped2 = true;
+                    std::printf("[DISASM 80092EC0-80092F20]:\n");
+                    for (uint32_t a = 0x80092EC0; a < 0x80092F20; a += 4) {
+                        uint32_t w = *(uint32_t*)cpu.ram_ptr(a);
+                        std::printf("  %08X: %08X\n", a, w);
+                    }
+                }
+                std::printf("[RETURN FROM 80080998 @vf=%u] returning to ra=%08X\n", vframes, cpu.r[31]);
+            }
+            if (cpu.pc == 0x80080FBC) {
+                static bool dumped3 = false;
+                if (!dumped3) {
+                    dumped3 = true;
+                    std::printf("[DISASM 80080FBC-80081040]:\n");
+                    for (uint32_t a = 0x80080FBC; a < 0x80081040; a += 4) {
+                        uint32_t w = *(uint32_t*)cpu.ram_ptr(a);
+                        std::printf("  %08X: %08X\n", a, w);
+                    }
+                }
+                std::printf("[CALL 80080FBC @vf=%u] ra=%08X ot_base=%08X\n", vframes, cpu.r[31], *(uint32_t*)cpu.ram_ptr(0x800569D8));
+            }
+            if (cpu.pc == 0x80082664) {
+                static bool dumped4 = false;
+                if (!dumped4) {
+                    dumped4 = true;
+                    std::printf("[DISASM 80082640-800826A0]:\n");
+                    for (uint32_t a = 0x80082640; a < 0x800826A0; a += 4) {
+                        uint32_t w = *(uint32_t*)cpu.ram_ptr(a);
+                        std::printf("  %08X: %08X\n", a, w);
+                    }
+                }
+                std::printf("[AT 80082664 @vf=%u] v0=%08X a0=%08X a1=%08X a2=%08X a3=%08X\n",
+                    vframes, cpu.r[2], cpu.r[4], cpu.r[5], cpu.r[6], cpu.r[7]);
+            }
+            if (cpu.pc == 0x80018B08) {
+                std::printf("[EVENT @vf=%u] BufferSwap() ra=%08X ot_base=%08X\n", vframes, cpu.r[31], *(uint32_t*)cpu.ram_ptr(0x800569D8));
+            } else if (cpu.pc == 0x80031208) {
+                std::printf("[EVENT @vf=%u] ClearOTag() a0=%08X a1=%d\n", vframes, cpu.r[4], (int)cpu.r[5]);
+            } else if (cpu.pc == 0x800243A0) {
+                const char* str = (const char*)cpu.ram_ptr(cpu.r[6]);
+                uint32_t ot_69d8 = *(uint32_t*)cpu.ram_ptr(0x800569D8);
+                uint32_t ot_b68c = *(uint32_t*)cpu.ram_ptr(0x8005B68C);
+                std::printf("[EVENT @vf=%u] DrawText(%s) 69D8=%08X B68C=%08X\n", vframes, str ? str : "?", ot_69d8, ot_b68c);
+            } else if (cpu.pc == 0x800248A0) {
+                if (draw_text_calls++ < 30) {
+                    const char* fmt = (const char*)cpu.ram_ptr(cpu.r[6]);
+                    std::printf("[DrawTextFmt @vframe=%u] x=%d y=%d fmt=%s\n", vframes, (int16_t)cpu.r[4], (int16_t)cpu.r[5], fmt ? fmt : "<null>");
+                }
+            } else if (cpu.pc == 0x800809A0) { // menu state machine
+                static uint32_t last_vf = 0;
+                if (last_vf != vframes) {
+                    last_vf = vframes;
+                    std::printf("[Menu @vframe=%u] menu_desc=%08X state_arg=%d, 0x8009AF00=%u, 0x8005A624=%08X\n",
+                        vframes, cpu.r[4], (int)cpu.r[5],
+                        *(const uint32_t*)cpu.ram_ptr(0x8009AF00),
+                        *(const uint32_t*)cpu.ram_ptr(0x8005A624));
+                }
+            } else if (cpu.pc == 0x8002992C) {
+                // TEST: sincronizza 0x800569D8 con 0x8005B68C
+                uint32_t b68c = *(uint32_t*)cpu.ram_ptr(0x8005B68C);
+                uint32_t* p69d8 = (uint32_t*)cpu.ram_ptr(0x800569D8);
+                if (*p69d8 != b68c) {
+                    std::printf("[FIX SYNC 69D8] was %08X, now set to B68C=%08X @vf=%u\n", *p69d8, b68c, vframes);
+                    *p69d8 = b68c;
+                }
+                static int q_count = 0;
+                if (q_count++ < 20) {
+                    int16_t qx = (int16_t)cpu.r[5];
+                    int16_t qy = (int16_t)(cpu.r[5] >> 16);
+                    uint8_t* pa1 = cpu.ram_ptr(0x8005B68C);
+                    uint32_t a1 = pa1 ? *(const uint32_t*)pa1 : 0;
+                    uint8_t* pt3 = cpu.ram_ptr(a1 + 0x4008);
+                    uint32_t t3 = pt3 ? *(const uint32_t*)pt3 : 0;
+                    uint8_t* pot = cpu.ram_ptr(0x800569D8);
+                    uint32_t ot_base = pot ? *(const uint32_t*)pot : 0;
+                    uint8_t* pot0 = cpu.ram_ptr(ot_base);
+                    uint32_t ot0_val = pot0 ? *(const uint32_t*)pot0 : 0;
+                    std::printf("[TextQuad @vframe=%u] x=%d y=%d sprite=%08X packet_ptr=%08X (a1=%08X) ot_base=%08X ot[0]=%08X\n",
+                        vframes, qx, qy, cpu.r[4], t3, a1, ot_base, ot0_val);
+                }
+            }
+        }
         hist[cpu.pc]++;
         cpu.step();
     }

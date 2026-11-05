@@ -84,6 +84,19 @@ bool MipsCpu::load_psx_exe(const std::string& path) {
 static inline int32_t sx16(uint32_t v) { return (int16_t)v; }
 
 void MipsCpu::step() {
+    // Crash Bash Pause Menu / 2D UI Double-Buffer Sync:
+    // DrawTextQuad (0x8002992C) alloca i pacchetti testo da *(0x8005B68C), ma li linka
+    // nella OT di Viewport 0 *(0x800569D8). Nei menu di pausa (Warp Room e minigiochi),
+    // il rendering 3D e' sospeso e la viewport non viene aggiornata prima del testo,
+    // lasciando 0x800569D8 sul buffer del frame precedente (che viene azzerato prima del DMA).
+    // Sincronizzando *(0x800569D8) = *(0x8005B68C) all'ingresso di DrawTextQuad, i quad
+    // vengono inseriti nella OT attiva e inviati correttamente al DMA GPU.
+    if (pc == 0x8002992C) {
+        uint32_t b68c;
+        std::memcpy(&b68c, &ram[0x5B68C], 4);
+        std::memcpy(&ram[0x569D8], &b68c, 4);
+    }
+
     // Hook HLE: controllo rapido dell'intervallo prima della lookup hash
     if (pc < 0x200 || (pc >= 0x80030000 && pc < 0x80040000)) {
         auto it = hooks.find(pc);
