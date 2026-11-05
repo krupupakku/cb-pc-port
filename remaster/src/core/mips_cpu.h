@@ -25,6 +25,7 @@ struct MipsCpu {
     uint64_t instr_count = 0;
     bool     halted = false;
     std::string halt_reason;
+    bool     widescreen_hack = false; // DuckStation-style 3D Widescreen FOV Expansion (16:9)
 
     std::vector<uint8_t> ram;  // 2 MB
     std::unordered_map<uint32_t, HleHook> hooks;

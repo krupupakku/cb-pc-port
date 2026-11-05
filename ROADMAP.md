@@ -36,16 +36,27 @@ Questa roadmap definisce il percorso tecnico step-by-step per portare *Crash Bas
 > **Obiettivo:** Sostituire la GPU/GTE PS1 con un renderer moderno ad alta risoluzione.
 
 - [x] **Renderer PC con supporto OpenGL (`remaster/src/renderer/`):**
-  - Finestra nativa SDL / Win32 con context OpenGL.
-  - Rasterizer GPU PS1 software funzionante a pixel-buffer con upscaling a finestra.
+  - Finestra nativa Win32 con context OpenGL.
+  - Rasterizer GPU PS1 software ad alte prestazioni con upscaling e display centrico.
   - Correzione proporzioni aspect ratio (4:3 con centering dinamico, eliminato zoom/sbordamento).
   - Correzione bug istruzioni GTE (fix flag e calcolo matrici `OP`, eliminata la distorsione sui modelli di trofei, gemme e cristalli).
-- [ ] **Risoluzione 4K e Precisione Floating-Point:**
-  - Intercettazione delle chiamate di disegno primitive poligonali per rasterizzazione diretta in shader moderni senza wobble poligonale.
-- [ ] **Supporto Widescreen (16:9 / 21:9 anamorfico/espanso):**
-  - Espansione frustum 3D mantenendo l'HUD 2D proporzionato.
+- [x] **Aumento della Risoluzione Interna di Rendering (1x, 2x, 4x Ultra HD):**
+  - Rasterizzazione della geometria poligonale 3D con precisione sub-pixel a risoluzione aumentata (`1024x480` a 2x, `2048x960` a 4x per 4K).
+  - I contorni dei modelli 3D (Crash, boss, arene, oggetti) sono disegnati con precisione geometrica elevata, eliminando la scalettatura a blocchi nativa della PS1.
+  - Supporto al **Texture Bilinear Filtering sui modelli 3D** (attivabile/disattivabile con `F8`).
+  - Ciclo della risoluzione interna a caldo in tempo reale con tasto **`F7`**.
+- [x] **Widescreen Hack 3D Nativo (Stile DuckStation):**
+  - Espansione del Field of View (FOV) 3D nel coprocessore GTE (`div_x = (div * 3) / 4`).
+  - La telecamera 3D inquadra il 33% di scenario in più a destra e a sinistra (mostrando i bordi dell'arena nascosti nelle TV 4:3).
+  - I modelli 3D mantengono le loro proporzioni esatte e non vengono allargati/schiacciati (`0.75 * 1.3333 = 1.0`).
+  - Gli elementi dell'interfaccia 2D (HUD, icone, punteggi) rimangono posizionati correttamente senza distorsioni anamorfiche.
+  - Switch aspect ratio e Widescreen Hack a caldo con tasto **`F5`** (16:9 Widescreen $\leftrightarrow$ 4:3 Originale).
+- [x] **Pipeline Shader GLSL Post-Processing (4K & Retro):**
+  - Sharp-Bilinear Pixel-Perfect HD per scaling 4K senza effetto sfocato.
+  - Retro CRT Scanlines Trinitron a fosfori.
+  - Ciclo filtri a caldo con tasto **`F6`**, Schermo Intero Borderless con **`F11`** o **`Alt + Invio`**.
 - [x] **Framerate e Performance:**
-  - Ottimizzazione Release `-O3`, eliminazione overhead cache e lookup, esecuzione a 60 FPS stabili.
+  - Ottimizzazione Release `-O3`, esecuzione a 60 FPS stabili.
 
 ---
 

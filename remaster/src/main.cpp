@@ -40,7 +40,7 @@ static void Fatal(const std::string& msg) {
 
 int main(int argc, char* argv[]) {
     bool verbose = false;
-    float aspect = 4.0f / 3.0f;
+    float aspect = 0.0f; // 0.0f = usa la modalità dinamica di default (4:3 o 16:9 con F5)
     for (int i = 1; i < argc; i++) {
         std::string a = argv[i];
         if (a == "-v") verbose = true;
@@ -57,6 +57,8 @@ int main(int argc, char* argv[]) {
     if (disc.empty()) { Fatal("original/disc/bash.bin non trovato."); return 1; }
 
     if (!cb::renderer::Initialize(1920, 1080, true)) return 1;
+    if (aspect > 0.0f) cb::renderer::SetAspectRatio(aspect);
+
     cb::input::Initialize();
     cb::audio::Initialize();
     cb::netcode::Initialize();
@@ -65,7 +67,8 @@ int main(int argc, char* argv[]) {
     console.verbose = verbose;
     if (!console.init(exe, disc)) { Fatal("Inizializzazione console fallita."); return 1; }
 
-    std::printf("\n[Info] Controlli (P1): frecce/WASD, Z=X(croce), X=quadrato, C=cerchio, V=triangolo, Invio=Start, ESC=esci.\n");
+    std::printf("\n[Info] Controlli di gioco (P1): Frecce/WASD, Z=X(croce), X=quadrato, C=cerchio, V=triangolo, Invio=Start, ESC=esci.\n");
+    std::printf("[Info] Tasti Grafica: F5=Aspect Ratio (4:3 / 16:9 Widescreen 3D Hack), F6=Filtro GLSL (Sharp 4K / CRT / Smooth), F7=Risoluzione Interna (1x / 2x / 4x), F8=Filtro Texture 3D, F11 o Alt+Invio=Schermo Intero.\n\n");
 
 #ifdef _WIN32
     LARGE_INTEGER freq, last, now;
@@ -82,6 +85,11 @@ int main(int argc, char* argv[]) {
             const auto& c = cb::input::GetController(p);
             console.set_pad(p, (c.flags & cb::input::CB_CTRL_CONNECTED) != 0 || p == 0, (uint16_t)c.buttonsHeld);
         }
+
+        // Sincronizza Widescreen Hack 3D e Risoluzione Interna con la configurazione del renderer
+        console.cpu.widescreen_hack = cb::renderer::IsWidescreenHackEnabled();
+        console.gpu.set_scale(cb::renderer::GetInternalResolutionScale());
+        console.gpu.bilinear_tex = cb::renderer::IsBilinearTexturesEnabled();
 
         int consumed = 0;
         LARGE_INTEGER t0, t1;
@@ -101,7 +109,8 @@ int main(int argc, char* argv[]) {
         }
 
         const auto& g = console.gpu;
-        cb::renderer::PresentPsxFrame(g.vram.data(), g.disp_x, g.disp_y, g.hres, g.vres, g.disp_enabled, aspect);
+        cb::renderer::PresentPsxFrame(g.vram.data(), g.disp_x, g.disp_y, g.hres, g.vres, g.disp_enabled, 0.0f,
+                                     g.scale > 1 ? g.hires_vram.data() : nullptr, g.scale);
 
 #ifdef _WIN32
         // Pacing a ~59.94 Hz (per 'consumed' frame video)
@@ -113,10 +122,16 @@ int main(int argc, char* argv[]) {
             if (target - dt > 0.002) Sleep(1);
         }
         if (fpsAcc >= 1.0) {
-            char t[220];
-            std::snprintf(t, sizeof t, "Crash Bash: Remaster+ | %dx%d (disp %d,%d) | video %.1f Hz | gioco %.1f fps | CPU emu %.0f%%%s",
-                          g.hres, g.vres, g.disp_x, g.disp_y,
-                          videoFrames / fpsAcc, fpsCnt / fpsAcc, 100.0 * cpuAcc / (fpsCnt ? fpsCnt : 1), halted ? " | CPU FERMA" : "");
+            char t[256];
+            std::snprintf(t, sizeof t, "Crash Bash: Remaster+ | %s (3D Widescreen: %s) | Res Interna: %s | %s | %dx%d | video %.1f Hz | gioco %.1f fps | CPU emu %.0f%%%s%s",
+                          cb::renderer::GetAspectRatioName(),
+                          cb::renderer::IsWidescreenHackEnabled() ? "ATTIVO" : "OFF",
+                          cb::renderer::GetInternalResolutionName(),
+                          cb::renderer::GetVideoFilterName(),
+                          g.hres * g.scale, g.vres * g.scale,
+                          videoFrames / fpsAcc, fpsCnt / fpsAcc, 100.0 * cpuAcc / (fpsCnt ? fpsCnt : 1),
+                          cb::renderer::IsFullscreen() ? " | FS" : "",
+                          halted ? " | CPU FERMA" : "");
             cb::renderer::SetWindowTitle(t);
             fpsAcc = 0; fpsCnt = 0; videoFrames = 0; cpuAcc = 0;
         }

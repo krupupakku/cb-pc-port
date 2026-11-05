@@ -34,6 +34,13 @@ struct Gpu {
 
     uint64_t prim_count = 0;
 
+    // Risoluzione interna e rendering HD (Remaster+)
+    int scale = 1; // 1 = nativo PS1 (512x240), 2 = 2x HD (1024x480), 4 = 4x Ultra HD (2048x960)
+    bool bilinear_tex = true;
+    std::vector<uint32_t> hires_vram;
+
+    void set_scale(int s);
+
     void gp0(uint32_t w);
     void gp1(uint32_t w);
     uint32_t gpustat() const;
@@ -52,8 +59,11 @@ private:
     void copy_rect();
     struct V { int x, y; int r, g, b; int u, v; };
     void raster_tri(const V& a, const V& b, const V& c, bool gouraud, bool textured, bool semi, bool raw, uint16_t clut, int ctpx, int ctpy, int cdepth, int csemi);
+    void raster_tri_hires(const V& a, const V& b, const V& c, bool gouraud, bool textured, bool semi, bool raw, uint16_t clut, int ctpx, int ctpy, int cdepth, int csemi);
     uint16_t fetch_tex(int u, int v, uint16_t clut, int px, int py, int depth);
+    uint16_t fetch_tex_bilinear(float u, float v, uint16_t clut, int px, int py, int depth);
     void put_pixel(int x, int y, int r, int g, int b, bool semi, int smode, bool texsemi);
+    void put_pixel_hires(int x, int y, int r, int g, int b, bool semi, int smode, bool texsemi);
 };
 
 } // namespace cb

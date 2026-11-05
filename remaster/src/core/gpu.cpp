@@ -8,6 +8,32 @@ namespace cb {
 static inline int sx11(uint32_t v) { return ((int)(v << 21)) >> 21; }
 static inline uint32_t rd32(uint8_t* ram, uint32_t mask, uint32_t a) { uint32_t v; std::memcpy(&v, ram + (a & mask & ~3u), 4); return v; }
 
+void Gpu::set_scale(int s) {
+    int target = (s == 2 || s == 4) ? s : 1;
+    if (target == scale && (target == 1 || !hires_vram.empty())) return;
+    scale = target;
+    if (scale > 1) {
+        hires_vram.assign((size_t)(1024 * scale) * (512 * scale), 0xFF000000u);
+        int maxW = 1024 * scale;
+        for (int y = 0; y < 512; y++) {
+            for (int x = 0; x < 1024; x++) {
+                uint16_t pix = vram[y * 1024 + x];
+                uint32_t r = ((pix & 31) << 3) | ((pix & 31) >> 2);
+                uint32_t g = (((pix >> 5) & 31) << 3) | (((pix >> 5) >> 2) & 7);
+                uint32_t b = (((pix >> 10) & 31) << 3) | (((pix >> 10) >> 2) & 7);
+                uint32_t rgba = 0xFF000000u | (b << 16) | (g << 8) | r;
+                for (int dy = 0; dy < scale; dy++) {
+                    for (int dx = 0; dx < scale; dx++) {
+                        hires_vram[(y * scale + dy) * maxW + (x * scale + dx)] = rgba;
+                    }
+                }
+            }
+        }
+    } else {
+        hires_vram.clear();
+    }
+}
+
 uint32_t Gpu::gpustat() const {
     static uint32_t tog = 0; tog ^= 0x80000000u;
     uint32_t s = (uint32_t)(tpx & 15) | ((tpy & 1) << 4) | ((semi_mode & 3) << 5) | ((tex_depth & 3) << 7);
@@ -56,7 +82,20 @@ void Gpu::gp0(uint32_t w) {
     if (cpu2vram) {
         for (int i = 0; i < 2 && cpos < cw * ch; i++, cpos++) {
             int px = (cx + cpos % cw) & 1023, py = (cy + cpos / cw) & 511;
-            vram[py * 1024 + px] = (uint16_t)(w >> (16 * i));
+            uint16_t pix = (uint16_t)(w >> (16 * i));
+            vram[py * 1024 + px] = pix;
+            if (scale > 1 && !hires_vram.empty()) {
+                uint32_t r = ((pix & 31) << 3) | ((pix & 31) >> 2);
+                uint32_t g = (((pix >> 5) & 31) << 3) | (((pix >> 5) >> 2) & 7);
+                uint32_t b = (((pix >> 10) & 31) << 3) | (((pix >> 10) >> 2) & 7);
+                uint32_t rgba = 0xFF000000u | (b << 16) | (g << 8) | r;
+                int maxW = 1024 * scale;
+                for (int dy = 0; dy < scale; dy++) {
+                    for (int dx = 0; dx < scale; dx++) {
+                        hires_vram[(py * scale + dy) * maxW + (px * scale + dx)] = rgba;
+                    }
+                }
+            }
         }
         if (cpos >= cw * ch) cpu2vram = false;
         return;
@@ -99,11 +138,15 @@ void Gpu::exec_command() {
     case 0x80: copy_rect(); break;
     case 0xA0: {
         cx = fifo[1] & 0x3FF; cy = (fifo[1] >> 16) & 0x1FF;
-        cw = fifo[2] & 0x3FF; ch = (fifo[2] >> 16) & 0x1FF; if (!cw) cw = 1024; if (!ch) ch = 512;
+        cw = fifo[2] & 0x3FF; ch = (fifo[2] >> 16) & 0x1FF;
+        if (!cw) cw = 1024;
+        if (!ch) ch = 512;
         cpos = 0; cpu2vram = true; break; }
     case 0xC0: {
         rx = fifo[1] & 0x3FF; ry = (fifo[1] >> 16) & 0x1FF;
-        rw = fifo[2] & 0x3FF; rh = (fifo[2] >> 16) & 0x1FF; if (!rw) rw = 1024; if (!rh) rh = 512;
+        rw = fifo[2] & 0x3FF; rh = (fifo[2] >> 16) & 0x1FF;
+        if (!rw) rw = 1024;
+        if (!rh) rh = 512;
         rpos = 0; vram2cpu = true; break; }
     case 0xE1: { uint32_t w = fifo[0]; tpx = w & 15; tpy = (w >> 4) & 1; semi_mode = (w >> 5) & 3; tex_depth = (w >> 7) & 3;
                  dither = (w >> 9) & 1; draw_to_display = (w >> 10) & 1; break; }
@@ -122,6 +165,18 @@ void Gpu::fill_rect() {
     int x = fifo[1] & 0x3F0, y = (fifo[1] >> 16) & 0x1FF;
     int w = (((fifo[2] & 0x3FF) + 0xF) & ~0xF), h = (fifo[2] >> 16) & 0x1FF;
     for (int j = 0; j < h; j++) for (int i = 0; i < w; i++) vram[((y + j) & 511) * 1024 + ((x + i) & 1023)] = px;
+    if (scale > 1 && !hires_vram.empty()) {
+        uint32_t rgba = 0xFF000000u | (b << 16) | (g << 8) | r;
+        int maxW = 1024 * scale, maxH = 512 * scale;
+        int hx = x * scale, hy = y * scale, hw = w * scale, hh = h * scale;
+        for (int j = 0; j < hh; j++) {
+            int py = (hy + j) % maxH;
+            for (int i = 0; i < hw; i++) {
+                int px_pos = (hx + i) % maxW;
+                hires_vram[py * maxW + px_pos] = rgba;
+            }
+        }
+    }
 }
 
 void Gpu::copy_rect() {
@@ -130,6 +185,17 @@ void Gpu::copy_rect() {
     std::vector<uint16_t> tmp((size_t)w * h);
     for (int j = 0; j < h; j++) for (int i = 0; i < w; i++) tmp[j * w + i] = vram[((sy + j) & 511) * 1024 + ((sx + i) & 1023)];
     for (int j = 0; j < h; j++) for (int i = 0; i < w; i++) vram[((dy + j) & 511) * 1024 + ((dx + i) & 1023)] = tmp[j * w + i];
+
+    if (scale > 1 && !hires_vram.empty()) {
+        int maxW = 1024 * scale, maxH = 512 * scale;
+        int hsx = sx * scale, hsy = sy * scale, hdx = dx * scale, hdy = dy * scale;
+        int hw = w * scale, hh = h * scale;
+        std::vector<uint32_t> htmp((size_t)hw * hh);
+        for (int j = 0; j < hh; j++) for (int i = 0; i < hw; i++)
+            htmp[j * hw + i] = hires_vram[((hsy + j) % maxH) * maxW + ((hsx + i) % maxW)];
+        for (int j = 0; j < hh; j++) for (int i = 0; i < hw; i++)
+            hires_vram[((hdy + j) % maxH) * maxW + ((hdx + i) % maxW)] = htmp[j * hw + i];
+    }
 }
 
 void Gpu::put_pixel(int x, int y, int r, int g, int b, bool semi, int smode, bool texsemi) {
@@ -162,6 +228,123 @@ uint16_t Gpu::fetch_tex(int u, int v, uint16_t clut, int px, int py, int depth) 
         return vram[((clut >> 6) & 511) * 1024 + (((clut & 63) * 16 + idx) & 1023)];
     }
     return vram[(by + v) * 1024 + ((bx + u) & 1023)];
+}
+
+void Gpu::put_pixel_hires(int x, int y, int r, int g, int b, bool semi, int smode, bool texsemi) {
+    int maxW = 1024 * scale, maxH = 512 * scale;
+    if (x < clip_x0 * scale || x > clip_x1 * scale || y < clip_y0 * scale || y > clip_y1 * scale ||
+        x < 0 || x >= maxW || y < 0 || y >= maxH) return;
+
+    uint32_t& dst = hires_vram[y * maxW + x];
+    if (semi && texsemi) {
+        int br = dst & 255, bg = (dst >> 8) & 255, bb = (dst >> 16) & 255;
+        switch (smode) {
+        case 0: r = (br + r) >> 1; g = (bg + g) >> 1; b = (bb + b) >> 1; break;
+        case 1: r = br + r; g = bg + g; b = bb + b; break;
+        case 2: r = br - r; g = bg - g; b = bb - b; break;
+        default: r = br + (r >> 2); g = bg + (g >> 2); b = bb + (b >> 2); break;
+        }
+        r = std::clamp(r, 0, 255); g = std::clamp(g, 0, 255); b = std::clamp(b, 0, 255);
+    }
+    dst = 0xFF000000u | ((uint32_t)b << 16) | ((uint32_t)g << 8) | (uint32_t)r;
+}
+
+uint16_t Gpu::fetch_tex_bilinear(float uf, float vf, uint16_t clut, int px, int py, int depth) {
+    int u0 = (int)uf, v0 = (int)vf;
+    float fu = uf - (float)u0, fv = vf - (float)v0;
+    int u1 = (u0 + 1) & 255, v1 = (v0 + 1) & 255;
+    u0 &= 255; v0 &= 255;
+    uint16_t t00 = fetch_tex(u0, v0, clut, px, py, depth);
+    if (!bilinear_tex || t00 == 0) return t00;
+    uint16_t t10 = fetch_tex(u1, v0, clut, px, py, depth);
+    uint16_t t01 = fetch_tex(u0, v1, clut, px, py, depth);
+    uint16_t t11 = fetch_tex(u1, v1, clut, px, py, depth);
+    if (t10 == 0) t10 = t00;
+    if (t01 == 0) t01 = t00;
+    if (t11 == 0) t11 = t00;
+
+    auto unpack = [](uint16_t t, int& r, int& g, int& b) {
+        r = (t & 31) << 3; g = ((t >> 5) & 31) << 3; b = ((t >> 10) & 31) << 3;
+    };
+    int r00, g00, b00, r10, g10, b10, r01, g01, b01, r11, g11, b11;
+    unpack(t00, r00, g00, b00); unpack(t10, r10, g10, b10);
+    unpack(t01, r01, g01, b01); unpack(t11, r11, g11, b11);
+
+    float w00 = (1.0f - fu) * (1.0f - fv);
+    float w10 = fu * (1.0f - fv);
+    float w01 = (1.0f - fu) * fv;
+    float w11 = fu * fv;
+
+    int r = (int)(r00 * w00 + r10 * w10 + r01 * w01 + r11 * w11);
+    int g = (int)(g00 * w00 + g10 * w10 + g01 * w01 + g11 * w11);
+    int b = (int)(b00 * w00 + b10 * w10 + b01 * w01 + b11 * w11);
+
+    return (uint16_t)((r >> 3) | ((g >> 3) << 5) | ((b >> 3) << 10) | (t00 & 0x8000));
+}
+
+void Gpu::raster_tri_hires(const V& a0, const V& b0, const V& c0, bool gouraud, bool textured, bool semi, bool raw,
+                           uint16_t clut, int ctpx, int ctpy, int cdepth, int csemi) {
+    int s = scale;
+    V a = a0, b = b0, c = c0;
+    a.x *= s; a.y *= s;
+    b.x *= s; b.y *= s;
+    c.x *= s; c.y *= s;
+
+    auto edge = [](const V& p, const V& q, int x, int y) {
+        return (long long)(q.x - p.x) * (y - p.y) - (long long)(q.y - p.y) * (x - p.x);
+    };
+    long long area = edge(a, b, c.x, c.y);
+    if (area == 0) return;
+    if (area < 0) { std::swap(b, c); area = -area; }
+
+    int maxW = 1024 * s, maxH = 512 * s;
+    int minx = std::max({std::min({a.x, b.x, c.x}), clip_x0 * s, 0});
+    int maxx = std::min({std::max({a.x, b.x, c.x}), clip_x1 * s, maxW - 1});
+    int miny = std::max({std::min({a.y, b.y, c.y}), clip_y0 * s, 0});
+    int maxy = std::min({std::max({a.y, b.y, c.y}), clip_y1 * s, maxH - 1});
+    if (std::max({a.x, b.x, c.x}) - std::min({a.x, b.x, c.x}) > maxW ||
+        std::max({a.y, b.y, c.y}) - std::min({a.y, b.y, c.y}) > maxH) return;
+
+    auto bias = [](const V& p, const V& q) {
+        int dy = q.y - p.y, dx = q.x - p.x;
+        return (dy > 0 || (dy == 0 && dx < 0)) ? 0 : -1;
+    };
+    int b0b = bias(a, b), b1b = bias(b, c), b2b = bias(c, a);
+
+    float invArea = 1.0f / (float)area;
+
+    for (int y = miny; y <= maxy; y++) {
+        for (int x = minx; x <= maxx; x++) {
+            long long w2 = edge(a, b, x, y), w0 = edge(b, c, x, y), w1 = edge(c, a, x, y);
+            if (w2 + b0b < 0 || w0 + b1b < 0 || w1 + b2b < 0) continue;
+            float fa = (float)w0 * invArea, fb = (float)w1 * invArea, fc = (float)w2 * invArea;
+            int r, g, bl;
+            if (gouraud) {
+                r = (int)(a.r * fa + b.r * fb + c.r * fc);
+                g = (int)(a.g * fa + b.g * fb + c.g * fc);
+                bl = (int)(a.b * fa + b.b * fb + c.b * fc);
+            } else {
+                r = a.r; g = a.g; bl = a.b;
+            }
+            bool texsemi = true;
+            if (textured) {
+                float uf = a.u * fa + b.u * fb + c.u * fc;
+                float vf = a.v * fa + b.v * fb + c.v * fc;
+                uint16_t t = bilinear_tex ? fetch_tex_bilinear(uf, vf, clut, ctpx, ctpy, cdepth)
+                                          : fetch_tex((int)(uf + 0.5f), (int)(vf + 0.5f), clut, ctpx, ctpy, cdepth);
+                if (t == 0) continue;
+                int tr = (t & 31) << 3, tg = ((t >> 5) & 31) << 3, tb = ((t >> 10) & 31) << 3;
+                if (!raw) {
+                    tr = std::min(255, (tr * r) >> 7);
+                    tg = std::min(255, (tg * g) >> 7);
+                    tb = std::min(255, (tb * bl) >> 7);
+                }
+                r = tr; g = tg; bl = tb;
+                texsemi = (t & 0x8000) != 0;
+            }
+            put_pixel_hires(x, y, std::clamp(r, 0, 255), std::clamp(g, 0, 255), std::clamp(bl, 0, 255), semi, csemi, textured ? texsemi : true);
+        }
+    }
 }
 
 void Gpu::raster_tri(const V& a0, const V& b0, const V& c0, bool gouraud, bool textured, bool semi, bool raw,
@@ -214,6 +397,10 @@ void Gpu::draw_poly(bool quad, bool gouraud, bool textured, bool semi, bool raw)
     }
     raster_tri(v[0], v[1], v[2], gouraud, textured, semi, raw, clut, ctpx, ctpy, cdepth, csemi);
     if (quad) raster_tri(v[1], v[2], v[3], gouraud, textured, semi, raw, clut, ctpx, ctpy, cdepth, csemi);
+    if (scale > 1 && !hires_vram.empty()) {
+        raster_tri_hires(v[0], v[1], v[2], gouraud, textured, semi, raw, clut, ctpx, ctpy, cdepth, csemi);
+        if (quad) raster_tri_hires(v[1], v[2], v[3], gouraud, textured, semi, raw, clut, ctpx, ctpy, cdepth, csemi);
+    }
 }
 
 void Gpu::draw_rect(int sizeMode, bool textured, bool semi, bool raw) {
@@ -234,6 +421,13 @@ void Gpu::draw_rect(int sizeMode, bool textured, bool semi, bool raw) {
             pr = tr; pg = tg; pb = tb; texsemi = (t & 0x8000) != 0;
         }
         put_pixel(x + k, y + j, pr, pg, pb, semi, semi_mode, texsemi);
+        if (scale > 1 && !hires_vram.empty()) {
+            for (int dy = 0; dy < scale; dy++) {
+                for (int dx = 0; dx < scale; dx++) {
+                    put_pixel_hires((x + k) * scale + dx, (y + j) * scale + dy, pr, pg, pb, semi, semi_mode, texsemi);
+                }
+            }
+        }
     }
 }
 

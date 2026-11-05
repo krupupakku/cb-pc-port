@@ -115,7 +115,16 @@ struct G {
             div = (((int64_t)H * 0x20000 / sz3) + 1) / 2;
             if (div > 0x1FFFF) div = 0x1FFFF;
         }
-        int64_t mx = div * c.gte_d[9] + c.gte_c[24];
+        int64_t div_x = div;
+        if (c.widescreen_hack) {
+            // DuckStation Widescreen Hack:
+            // Proietta la coordinata orizzontale moltiplicata per 3/4.
+            // Quando visualizzata a 16:9 (fattore di estensione 16/9 / 4/3 = 4/3),
+            // il mondo 3D e i personaggi mantengono proporzioni perfette (3/4 * 4/3 = 1.0)
+            // e la telecamera inquadra il 33% di scenario in più a destra e a sinistra!
+            div_x = (div * 3) / 4;
+        }
+        int64_t mx = div_x * c.gte_d[9] + c.gte_c[24];
         int64_t my = div * c.gte_d[10] + c.gte_c[25];
         c.gte_d[12] = c.gte_d[13]; c.gte_d[13] = c.gte_d[14];
         int32_t sx = clampi(mx >> 16, -1024, 1023), sy = clampi(my >> 16, -1024, 1023);
