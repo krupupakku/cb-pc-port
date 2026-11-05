@@ -65,6 +65,7 @@ int main(int argc, char* argv[]) {
 
     static cb::Console console;   // statico: contiene RAM/VRAM
     console.verbose = verbose;
+    console.on_vibration = cb::input::SetVibration;
     if (!console.init(exe, disc)) { Fatal("Inizializzazione console fallita."); return 1; }
 
     std::printf("\n[Info] Controlli di gioco (P1): Frecce/WASD, Z=X(croce), X=quadrato, C=cerchio, V=triangolo, Invio=Start, ESC=esci.\n");
@@ -83,7 +84,8 @@ int main(int argc, char* argv[]) {
         cb::input::PollControllers();
         for (int p = 0; p < 4; p++) {
             const auto& c = cb::input::GetController(p);
-            console.set_pad(p, (c.flags & cb::input::CB_CTRL_CONNECTED) != 0 || p == 0, (uint16_t)c.buttonsHeld);
+            console.set_pad(p, (c.flags & cb::input::CB_CTRL_CONNECTED) != 0 || p == 0, (uint16_t)c.buttonsHeld,
+                            c.lx, c.ly, c.rx, c.ry);
         }
 
         // Sincronizza Widescreen Hack 3D e Risoluzione Interna con la configurazione del renderer

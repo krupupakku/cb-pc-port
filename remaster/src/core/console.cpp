@@ -120,6 +120,38 @@ void Console::setup_bios() {
         c.r[2] = vframes;
         return true;
     };
+
+    // Psy-Q Pad Driver Hooks per abilitare DualShock e attuatori vibrazione nativi
+    // PadGetState(port) @0x80035EAC: ritorna PadStateStable (6) se connesso, PadStateDiscon (0) se disconnesso
+    cpu.hooks[0x80035EAC] = [this](MipsCpu& c) {
+        int p = (int)(c.r[4] & 3);
+        c.r[2] = pad_connected[p] ? 6 : 0;
+        return true;
+    };
+
+    // PadInfoAct(port, act, func) @0x800360DC: segnala la presenza degli attuatori
+    cpu.hooks[0x800360DC] = [](MipsCpu& c) { c.r[2] = 1; return true; };
+
+    // PadInfoComb(port, type, no) @0x80036100
+    cpu.hooks[0x80036100] = [](MipsCpu& c) { c.r[2] = 1; return true; };
+
+    // PadSetActAlign(port, data, len) @0x8003624C
+    cpu.hooks[0x8003624C] = [](MipsCpu& c) { c.r[2] = 1; return true; };
+
+    // PadSetAct(port, act, len) @0x800363AC
+    cpu.hooks[0x800363AC] = [this](MipsCpu& c) {
+        uint32_t port = c.r[4];
+        uint32_t act_ptr = c.r[5];
+        if (act_ptr && on_vibration) {
+            uint8_t* act = c.ram_ptr(act_ptr);
+            if (act) {
+                int p = (int)(port & 3);
+                on_vibration(p, act[0], act[1]);
+            }
+        }
+        c.r[2] = 1;
+        return true;
+    };
 }
 
 void Console::setup_cd() {
@@ -171,12 +203,19 @@ void Console::setup_cd() {
     };
 }
 
-void Console::set_pad(int slot, bool connected, uint16_t held) {
-    pad_connected[slot & 3] = connected; pad_held[slot & 3] = held;
+void Console::set_pad(int slot, bool connected, uint16_t held, uint8_t lx, uint8_t ly, uint8_t rx, uint8_t ry) {
+    int s = slot & 3;
+    pad_connected[s] = connected;
+    pad_held[s] = held;
+    pad_lx[s] = lx;
+    pad_ly[s] = ly;
+    pad_rx[s] = rx;
+    pad_ry[s] = ry;
 }
 
 // Scrive i buffer pad "grezzi" come farebbe il BIOS: multitap sulla porta 1 (4 giocatori).
 // Formato per slot: [status][id][btnLo][btnHi][rx][ry][lx][ly], pulsanti active-low.
+// ID 0x73 = DualShock Analogico (supporta motori di vibrazione + stick analogici PS1).
 void Console::write_pads() {
     uint8_t* p1 = cpu.ram_ptr(0x80063A90);
     uint8_t* p2 = cpu.ram_ptr(0x80063AC4);
@@ -185,9 +224,12 @@ void Console::write_pads() {
         uint8_t* s = p1 + 2 + k * 8;
         if (!pad_connected[k]) { std::memset(s, 0xFF, 8); continue; }
         uint16_t raw = (uint16_t)~pad_held[k];
-        s[0] = 0x00; s[1] = 0x41;                      // pad digitale
+        s[0] = 0x00; s[1] = 0x73;                      // pad DualShock analogico
         s[2] = raw & 0xFF; s[3] = raw >> 8;
-        s[4] = s[5] = s[6] = s[7] = 0x80;
+        s[4] = pad_rx[k];
+        s[5] = pad_ry[k];
+        s[6] = pad_lx[k];
+        s[7] = pad_ly[k];
     }
     p2[0] = 0xFF;                                      // porta 2: nessun pad
 }
@@ -199,7 +241,35 @@ int Console::run_frame(uint64_t max_instr) {
     vsync_hit = false;
     uint64_t end = cpu.instr_count + max_instr;
     while (!cpu.halted && !vsync_hit && cpu.instr_count < end) cpu.step();
-    if (cpu.halted) { std::printf("[console] HALT: %s\n", cpu.halt_reason.c_str()); return 0; }
+    if (cpu.halted) {
+        if (on_vibration) {
+            for (int p = 0; p < 4; p++) on_vibration(p, 0, 0);
+        }
+        std::printf("[console] HALT: %s\n", cpu.halt_reason.c_str());
+        return 0;
+    }
+
+    // Polling attuatori di vibrazione da strutture controller Crash Bash (_controllers @0x80051338, stride 0x58)
+    if (on_vibration) {
+        for (int p = 0; p < 4; p++) {
+            if (!pad_connected[p]) {
+                on_vibration(p, 0, 0);
+                continue;
+            }
+            uint8_t* ctrl = cpu.ram_ptr(0x80051338 + p * 0x58);
+            if (ctrl) {
+                // Sblocca CONTROLLER_HAS_ANALOG (0x08) per consentire a SetBigMotor / SetSmallMotor di aggiornare i motori
+                *(uint32_t*)ctrl |= 0x08;
+
+                // Gli attuatori reali di Crash Bash risiedono a +0x20 e +0x21:
+                // Offset +0x20: small motor (0 o 1 / alta frequenza)
+                // Offset +0x21: big motor (0..255 / bassa frequenza, intensita urti/esplosioni)
+                // Offset +0x04 era invece 'buttonsHeld' (motivo per cui vibrava alla pressione dei tasti!)
+                on_vibration(p, ctrl[0x20], ctrl[0x21]);
+            }
+        }
+    }
+
     return vsync_hit ? vsync_frames : 1;
 }
 

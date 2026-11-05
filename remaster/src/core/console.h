@@ -16,14 +16,15 @@ public:
     Gpu     gpu;
     Spu     spu;
     bool    verbose = false;
+    std::function<void(int slot, uint8_t smallMotor, uint8_t bigMotor)> on_vibration;
 
     bool init(const std::string& exePath, const std::string& discBinPath);
 
     // Esegue il gioco fino al prossimo VSync. Ritorna i frame video consumati (0 = errore/halt).
     int run_frame(uint64_t max_instr = 50000000);
 
-    // Stato pad per i 4 slot del multitap (maschera nel formato CB_BTN_*, bit=1 premuto)
-    void set_pad(int slot, bool connected, uint16_t held);
+    // Stato pad per i 4 slot del multitap (maschera nel formato CB_BTN_*, bit=1 premuto + stick analogici)
+    void set_pad(int slot, bool connected, uint16_t held, uint8_t lx = 128, uint8_t ly = 128, uint8_t rx = 128, uint8_t ry = 128);
 
 private:
     uint8_t hw[0x2000] = {};
@@ -35,6 +36,10 @@ private:
     int      vsync_frames = 1;
     bool     pad_connected[4] = {};
     uint16_t pad_held[4] = {};
+    uint8_t  pad_lx[4] = {128, 128, 128, 128};
+    uint8_t  pad_ly[4] = {128, 128, 128, 128};
+    uint8_t  pad_rx[4] = {128, 128, 128, 128};
+    uint8_t  pad_ry[4] = {128, 128, 128, 128};
 
     void setup_hw();
     void setup_bios();

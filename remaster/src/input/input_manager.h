@@ -49,6 +49,8 @@ struct BashControllerState {
     int32_t  field2_0x3c[5];
     uint32_t buttonsHeld;
     uint32_t buttonsPressed; // Edge-triggered (premuti in questo frame)
+    uint8_t  lx = 128, ly = 128; // Stick analogico sinistro (0..255, 128 = centro)
+    uint8_t  rx = 128, ry = 128; // Stick analogico destro (0..255, 128 = centro)
 };
 
 static constexpr int MAX_PLAYERS = 4;
@@ -63,6 +65,9 @@ void Shutdown();
 
 // Legge XInput / SteamInput per i 4 giocatori e popola l'array _controllers[4]
 void PollControllers();
+
+// Vibrazione XInput (rumble): smallMotor (alta frequenza/buzz), bigMotor (bassa frequenza/rumble pesante 0..255)
+void SetVibration(int playerIndex, uint8_t smallMotor, uint8_t bigMotor);
 
 const BashControllerState& GetController(int playerIndex);
 InputBackend GetActiveBackend();

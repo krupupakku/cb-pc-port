@@ -1,4 +1,5 @@
 #include "input/input_manager.h"
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -32,7 +33,29 @@ void Initialize() {
 }
 
 void Shutdown() {
+#ifdef _WIN32
+    for (int i = 0; i < MAX_PLAYERS; i++) {
+        XINPUT_VIBRATION vib{};
+        XInputSetState(static_cast<DWORD>(i), &vib);
+    }
+#endif
     std::printf("[Input] Sottosistema input terminato.\n");
+}
+
+void SetVibration(int playerIndex, uint8_t smallMotor, uint8_t bigMotor) {
+#ifdef _WIN32
+    if (playerIndex < 0 || playerIndex >= MAX_PLAYERS) return;
+    static uint8_t lastSmall[MAX_PLAYERS] = {};
+    static uint8_t lastBig[MAX_PLAYERS] = {};
+    if (smallMotor == lastSmall[playerIndex] && bigMotor == lastBig[playerIndex]) return;
+    lastSmall[playerIndex] = smallMotor;
+    lastBig[playerIndex] = bigMotor;
+
+    XINPUT_VIBRATION vib{};
+    vib.wLeftMotorSpeed = static_cast<WORD>(bigMotor * 257);
+    vib.wRightMotorSpeed = smallMotor ? (smallMotor > 1 ? static_cast<WORD>(smallMotor * 257) : 65535) : 0;
+    XInputSetState(static_cast<DWORD>(playerIndex), &vib);
+#endif
 }
 
 void PollControllers() {
@@ -41,6 +64,8 @@ void PollControllers() {
         bool connected = false;
         int32_t angle = 0;
         bool analogActive = false;
+        uint8_t stick_lx = 128, stick_ly = 128;
+        uint8_t stick_rx = 128, stick_ry = 128;
 
 #ifdef _WIN32
         XINPUT_STATE state{};
@@ -66,6 +91,12 @@ void PollControllers() {
             if (state.Gamepad.bLeftTrigger  > XINPUT_GAMEPAD_TRIGGER_THRESHOLD) held |= CB_BTN_L2;
             if (state.Gamepad.bRightTrigger > XINPUT_GAMEPAD_TRIGGER_THRESHOLD) held |= CB_BTN_R2;
 
+            // Coordinate analogiche PS1 (0..255, 128 = centro)
+            stick_lx = static_cast<uint8_t>(std::clamp((state.Gamepad.sThumbLX + 32768) >> 8, 0, 255));
+            stick_ly = static_cast<uint8_t>(std::clamp((32767 - state.Gamepad.sThumbLY) >> 8, 0, 255));
+            stick_rx = static_cast<uint8_t>(std::clamp((state.Gamepad.sThumbRX + 32768) >> 8, 0, 255));
+            stick_ry = static_cast<uint8_t>(std::clamp((32767 - state.Gamepad.sThumbRY) >> 8, 0, 255));
+
             // Conversione stick sinistro nell'angolo nativo di Crash Bash (0..4095, 0x1000 = 360°)
             const short lx = state.Gamepad.sThumbLX;
             const short ly = state.Gamepad.sThumbLY;
@@ -75,12 +106,14 @@ void PollControllers() {
                 double rad = std::atan2(static_cast<double>(lx), static_cast<double>(ly));
                 int32_t bashAng = static_cast<int32_t>((rad / (2.0 * 3.14159265358979323846)) * 4096.0);
                 angle = bashAng & 0xFFF;
-                // Il pad virtuale e' digitale: lo stick sinistro viene mappato sulla croce direzionale
+                // Mappa anche su D-Pad per compatibilita' universale con tutti i minigiochi
                 if (ly >  16000) held |= CB_BTN_UP;
                 if (ly < -16000) held |= CB_BTN_DOWN;
                 if (lx >  16000) held |= CB_BTN_RIGHT;
                 if (lx < -16000) held |= CB_BTN_LEFT;
             }
+        } else {
+            SetVibration(i, 0, 0);
         }
 
         // Fallback Tastiera su Player 1 per test rapido anche senza pad collegato
@@ -114,6 +147,10 @@ void PollControllers() {
         ctrl.targetAngle    = angle;
         ctrl.buttonsHeld    = held;
         ctrl.buttonsPressed = held & (~g_prevButtons[i]);
+        ctrl.lx             = stick_lx;
+        ctrl.ly             = stick_ly;
+        ctrl.rx             = stick_rx;
+        ctrl.ry             = stick_ry;
         g_prevButtons[i]    = held;
     }
 }
