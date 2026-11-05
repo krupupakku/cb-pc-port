@@ -829,22 +829,6 @@ void Gpu::dma_linked_list(uint8_t* ram, uint32_t mask, uint32_t addr) {
             polyline = false;
         }
         uint32_t next = hdr & 0xFFFFFF;
-        if (node == 0x5B790 || node == 0x5F79C) {
-            std::printf("[DMA VISITED OT[0] %08X] hdr=%08X cnt=%u next=%08X\n", node, hdr, cnt, next);
-            // Segui la catena di nodi per vedere tutti i pacchetti collegati a OT[0]
-            uint32_t cur = next;
-            int depth = 0;
-            while (cur != 0xFFFFFF && (cur & 0x800000) == 0 && cur != 0x00FFFFFF && depth++ < 50) {
-                uint32_t p_hdr = rd32(ram, mask, cur);
-                uint32_t p_cnt = p_hdr >> 24;
-                uint32_t p_cmd = (p_cnt > 0) ? rd32(ram, mask, cur + 4) : 0;
-                std::printf("   [OT[0] CHAIN #%d @%08X] cnt=%u cmd=%08X next=%08X\n", depth, cur, p_cnt, p_cmd, p_hdr & 0xFFFFFF);
-                cur = p_hdr & 0xFFFFFF;
-            }
-        }
-        if ((node & 0x1FFFFC) == (0x801F606C & 0x1FFFFC)) {
-            std::printf("[DMA VISITED 801F606C!] hdr=%08X\n", rd32(ram, mask, node));
-        }
         if (next == 0xFFFFFF || (next & 0x800000) != 0 || next == 0x00FFFFFF) {
             if (do_trace) {
                 std::printf("[PAUSE DMA END %08X] guard=%d last_node=%08X hdr=%08X next=%08X\n", addr, guard, last_node, hdr, next);

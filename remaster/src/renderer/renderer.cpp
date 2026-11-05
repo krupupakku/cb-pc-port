@@ -459,11 +459,15 @@ bool Initialize(uint32_t internalWidth, uint32_t internalHeight, bool widescreen
 
 #ifdef _WIN32
     HINSTANCE hInstance = GetModuleHandleA(nullptr);
+    HICON hIcon = LoadIconA(hInstance, MAKEINTRESOURCEA(1));
+    HICON hIconSm = (HICON)LoadImageA(hInstance, MAKEINTRESOURCEA(1), IMAGE_ICON, 16, 16, LR_DEFAULTCOLOR);
+
     WNDCLASSA wc{};
     wc.style         = CS_OWNDC | CS_HREDRAW | CS_VREDRAW;
     wc.lpfnWndProc   = WindowProc;
     wc.hInstance     = hInstance;
     wc.hCursor       = LoadCursor(nullptr, IDC_ARROW);
+    wc.hIcon         = hIcon;
     wc.lpszClassName = "CrashBashRemasterWndClass";
     RegisterClassA(&wc);
 
@@ -495,6 +499,13 @@ bool Initialize(uint32_t internalWidth, uint32_t internalHeight, bool widescreen
     if (!g_hwnd) {
         std::printf("[Renderer] ERRORE: Creazione finestra Win32 fallita.\n");
         return false;
+    }
+
+    if (hIcon) {
+        SendMessageA(g_hwnd, WM_SETICON, ICON_BIG, (LPARAM)hIcon);
+    }
+    if (hIconSm) {
+        SendMessageA(g_hwnd, WM_SETICON, ICON_SMALL, (LPARAM)hIconSm);
     }
 
     g_hdc = GetDC(g_hwnd);

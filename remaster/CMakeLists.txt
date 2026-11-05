@@ -63,7 +63,7 @@ target_include_directories(cb_boot PRIVATE
 # =============================================================================
 # 3. Engine Principale: crashbash_remaster (PC Native Port & Remaster+)
 # =============================================================================
-add_executable(crashbash_remaster
+set(CRASHBASH_REMASTER_SRCS
     src/main.cpp
     src/core/mips_cpu.cpp
     src/core/gte.cpp
@@ -75,6 +75,14 @@ add_executable(crashbash_remaster
     src/input/input_manager.cpp
     src/audio/audio_manager.cpp
     src/netcode/rollback_manager.cpp
+)
+
+if(WIN32)
+    list(APPEND CRASHBASH_REMASTER_SRCS crashbash_remaster.rc)
+endif()
+
+add_executable(crashbash_remaster
+    ${CRASHBASH_REMASTER_SRCS}
 )
 
 target_include_directories(crashbash_remaster PRIVATE
