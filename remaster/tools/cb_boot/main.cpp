@@ -2,6 +2,7 @@
 // Serve per scoprire quali funzioni Psy-Q vanno intercettate (HLE).
 #include "core/mips_cpu.h"
 #include "core/gpu.h"
+#include "core/spu.h"
 #include <cstdio>
 #include <cstdlib>
 #include <map>
@@ -28,6 +29,35 @@ static void dump_bmp(const char* path, const std::vector<uint16_t>& vram, int x0
     std::fclose(f);
 }
 
+static void dump_wav(const char* path, const std::vector<int16_t>& pcm, int sample_rate) {
+    FILE* f = std::fopen(path, "wb");
+    if (!f) return;
+    uint32_t data_bytes = (uint32_t)(pcm.size() * sizeof(int16_t));
+    uint32_t riff_size = 36 + data_bytes;
+    uint16_t channels = 2;
+    uint16_t bits = 16;
+    uint32_t byte_rate = sample_rate * channels * (bits / 8);
+    uint16_t block_align = channels * (bits / 8);
+
+    std::fwrite("RIFF", 1, 4, f);
+    std::fwrite(&riff_size, 4, 1, f);
+    std::fwrite("WAVEfmt ", 1, 8, f);
+    uint32_t sub1_size = 16;
+    uint16_t pcm_fmt = 1;
+    std::fwrite(&sub1_size, 4, 1, f);
+    std::fwrite(&pcm_fmt, 2, 1, f);
+    std::fwrite(&channels, 2, 1, f);
+    std::fwrite(&sample_rate, 4, 1, f);
+    std::fwrite(&byte_rate, 4, 1, f);
+    std::fwrite(&block_align, 2, 1, f);
+    std::fwrite(&bits, 2, 1, f);
+    std::fwrite("data", 1, 4, f);
+    std::fwrite(&data_bytes, 4, 1, f);
+    std::fwrite(pcm.data(), sizeof(int16_t), pcm.size(), f);
+    std::fclose(f);
+    std::printf("[Audio] Salvato WAV (%zu campioni stereo) in %s\n", pcm.size() / 2, path);
+}
+
 int main(int argc, char** argv) {
     const char* exe = argc > 1 ? argv[1] : "original/extracted/disc_files/SCUS_945.70";
     uint64_t maxi = argc > 2 ? std::strtoull(argv[2], nullptr, 0) : 5000000;
@@ -40,11 +70,20 @@ int main(int argc, char** argv) {
     static uint8_t hw[0x2000] = {};
     auto off = [](uint32_t a) { return a - 0x1F801000; };
     static Gpu gpu;
+    static Spu spu;
     cpu.io_read = [&](uint32_t a, int size) -> uint32_t {
         if (a < 0x1F801000 || a >= 0x1F803000) { if (io_log[a]++ < 2) std::printf("[io-r?] %08X\n", a); return 0; }
+        if (a == 0x1F801120) {
+            // Root Counter 2 (SysClock / 8): incrementa coi cicli CPU
+            return (uint32_t)((cpu.instr_count / 8) & 0xFFFF);
+        }
         if (a == 0x1F801814) return gpu.gpustat();
         if (a == 0x1F801810) return gpu.gpuread();
-        if (a == 0x1F801DAE) { uint16_t c; std::memcpy(&c, hw + off(0x1F801DAA), 2); return c & 0x3F; } // SPUSTAT
+        if (a >= 0x1F801C00 && a < 0x1F801E00) {
+            uint32_t lo = spu.read(a);
+            if (size == 4) return lo | ((uint32_t)spu.read(a + 2) << 16);
+            return lo;
+        }
         uint32_t v = 0; std::memcpy(&v, hw + off(a), size);
         return v;
     };
@@ -52,16 +91,26 @@ int main(int argc, char** argv) {
         if (a < 0x1F801000 || a >= 0x1F803000) return;
         if (a == 0x1F801810) { gpu.gp0(v); return; }
         if (a == 0x1F801814) { gpu.gp1(v); return; }
+        if (a >= 0x1F801C00 && a < 0x1F801E00) {
+            spu.write(a, (uint16_t)v);
+            if (size == 4) spu.write(a + 2, (uint16_t)(v >> 16));
+            return;
+        }
         if (a >= 0x1F801080 && a < 0x1F8010F0 && (a & 0xF) == 8) {   // DMA CHCR
             uint32_t ch = (a - 0x1F801080) >> 4;
             uint32_t madr, bcr; std::memcpy(&madr, hw + off(a - 8), 4); std::memcpy(&bcr, hw + off(a - 4), 4);
             if (v & 0x01000000) {
                 uint32_t sync = (v >> 9) & 3;
+                uint32_t words = (bcr & 0xFFFF) * (bcr >> 16 ? bcr >> 16 : 1);
                 if (ch == 2) {
                     if (sync == 2) gpu.dma_linked_list(cpu.ram.data(), 0x1FFFFC, madr);
-                    else if (v & 1) gpu.dma_block(cpu.ram.data(), 0x1FFFFC, madr, (bcr & 0xFFFF) * (bcr >> 16 ? bcr >> 16 : 1));
-                    else { uint32_t words = (bcr & 0xFFFF) * (bcr >> 16 ? bcr >> 16 : 1);
-                           for (uint32_t i = 0; i < words; i++) { uint32_t w = gpu.gpuread(); std::memcpy(&cpu.ram[(madr + i * 4) & 0x1FFFFC], &w, 4); } }
+                    else if (v & 1) gpu.dma_block(cpu.ram.data(), 0x1FFFFC, madr, words);
+                    else {
+                        for (uint32_t i = 0; i < words; i++) { uint32_t w = gpu.gpuread(); std::memcpy(&cpu.ram[(madr + i * 4) & 0x1FFFFC], &w, 4); }
+                    }
+                } else if (ch == 4) {                                  // SPU DMA
+                    uint32_t bytes = words * 4;
+                    spu.dma_write(cpu.ram.data() + (madr & 0x1FFFFC), bytes);
                 } else if (ch == 6) {                                  // OT clear (ClearOTagR)
                     uint32_t n = bcr & 0xFFFF, ad = madr;
                     for (uint32_t i = 0; i < n; i++, ad -= 4) {
@@ -96,9 +145,27 @@ int main(int argc, char** argv) {
 
     // HLE Psy-Q: VSync(mode) @0x800320EC. -1 = leggi contatore frame; 0/n = attendi (qui: avanza di 1)
     static uint32_t vframes = 0;
-    cpu.hooks[0x800320EC] = [&cpu](MipsCpu& c) {
+    static std::vector<int16_t> recorded_audio;
+    cpu.hooks[0x800320EC] = [&](MipsCpu& c) {
         int32_t mode = (int32_t)c.r[4];
-        if (mode >= 0 && mode != 1) vframes += (mode ? mode : 1);
+        if (mode >= 0 && mode != 1) {
+            int n = (mode ? mode : 1);
+            vframes += n;
+
+            // Tick del sottosistema audio ad ogni frame video
+            uint8_t* cb_ptr = c.ram_ptr(0x8006D86C);
+            uint32_t sound_callback = 0;
+            if (cb_ptr) std::memcpy(&sound_callback, cb_ptr, 4);
+            if (sound_callback >= 0x80010000 && sound_callback < 0x80080000) {
+                c.call_subroutine(sound_callback);
+            }
+
+            // Render audio SPU (735 campioni per frame a 60 Hz)
+            int samples = 735 * n;
+            size_t prev_sz = recorded_audio.size();
+            recorded_audio.resize(prev_sz + samples * 2);
+            spu.render(recorded_audio.data() + prev_sz, samples);
+        }
         c.r[2] = (mode == 1) ? vframes * 263 : vframes;
 
         // Iniezione input pad per navigare menu fino alla Warp Room
@@ -136,7 +203,12 @@ int main(int argc, char** argv) {
     auto bcd = [](uint32_t v) { return (uint8_t)(((v / 10) << 4) | (v % 10)); };
     auto unbcd = [](uint8_t v) { return (uint32_t)((v >> 4) * 10 + (v & 15)); };
 
-    cpu.hooks[0x80034AFC] = [](MipsCpu& c) { c.r[2] = 1; return true; };          // CdInit
+    cpu.hooks[0x80034AFC] = [&](MipsCpu& c) {
+        spu.main_vol_l = 0x3FFF;
+        spu.main_vol_r = 0x3FFF;
+        c.r[2] = 1;
+        return true;
+    };          // CdInit
     cpu.hooks[0x800349AC] = [](MipsCpu& c) { c.r[2] = 2; return true; };          // CdSync-like: complete
     cpu.hooks[0x800348A8] = [](MipsCpu& c) { c.r[2] = 0; return true; };          // CdSync(mode,res)
     cpu.hooks[0x80034C4C] = [](MipsCpu& c) { c.r[2] = 0; return true; };          // CdSetDebug-like
@@ -181,6 +253,7 @@ int main(int argc, char** argv) {
     }
     dump_bmp("build/vram_full.bmp", gpu.vram, 0, 0, 1024, 512);
     dump_bmp("build/display.bmp", gpu.vram, gpu.disp_x, gpu.disp_y, gpu.hres, gpu.vres);
+    dump_wav("build/audio_test.wav", recorded_audio, 44100);
     std::printf("GPU: %llu primitive, display %d,%d %dx%d en=%d\n", (unsigned long long)gpu.prim_count, gpu.disp_x, gpu.disp_y, gpu.hres, gpu.vres, gpu.disp_enabled);
     std::printf("\nstop dopo %llu istruzioni, pc=%08X ra=%08X\n", (unsigned long long)cpu.instr_count, cpu.pc, cpu.r[31]);
     if (cpu.halted) std::printf("HALT: %s\n", cpu.halt_reason.c_str());

@@ -73,7 +73,6 @@ int main(int argc, char* argv[]) {
     QueryPerformanceCounter(&last);
 #endif
     const double frameTime = 1.0 / 59.94;
-    uint64_t frames = 0;
     bool halted = false;
     double fpsAcc = 0, cpuAcc = 0; int fpsCnt = 0, videoFrames = 0;
 
@@ -92,9 +91,17 @@ int main(int argc, char* argv[]) {
         double emuSec = (double)(t1.QuadPart - t0.QuadPart) / (double)freq.QuadPart;
         if (!halted && consumed == 0) halted = true;
 
+        // Rendering e mixdown audio SPU (44100 Hz stereo: 735 campioni per frame video a 60Hz)
+        if (consumed > 0) {
+            int num_audio_samples = 735 * consumed;
+            static std::vector<int16_t> audio_buf;
+            audio_buf.resize(num_audio_samples * 2);
+            console.spu.render(audio_buf.data(), num_audio_samples);
+            cb::audio::SubmitSamples(audio_buf.data(), num_audio_samples);
+        }
+
         const auto& g = console.gpu;
         cb::renderer::PresentPsxFrame(g.vram.data(), g.disp_x, g.disp_y, g.hres, g.vres, g.disp_enabled, aspect);
-        frames++;
 
 #ifdef _WIN32
         // Pacing a ~59.94 Hz (per 'consumed' frame video)

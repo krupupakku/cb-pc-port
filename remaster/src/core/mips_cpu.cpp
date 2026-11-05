@@ -200,4 +200,28 @@ void MipsCpu::run(uint64_t max_instr) {
     while (!halted && instr_count < end) step();
 }
 
+void MipsCpu::call_subroutine(uint32_t target_addr, uint32_t a0) {
+    if (target_addr == 0 || halted) return;
+    uint32_t saved_r[32];
+    std::memcpy(saved_r, r, sizeof(r));
+    uint32_t saved_pc = pc;
+    uint32_t saved_next_pc = next_pc;
+
+    static constexpr uint32_t SENTINEL_RETURN = 0x00000008;
+    r[31] = SENTINEL_RETURN;
+    r[4]  = a0;
+    pc = target_addr;
+    next_pc = target_addr + 4;
+
+    uint32_t steps = 0;
+    while (!halted && pc != SENTINEL_RETURN && steps < 100000) {
+        step();
+        steps++;
+    }
+
+    std::memcpy(r, saved_r, sizeof(r));
+    pc = saved_pc;
+    next_pc = saved_next_pc;
+}
+
 } // namespace cb

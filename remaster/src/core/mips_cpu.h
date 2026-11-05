@@ -45,6 +45,7 @@ struct MipsCpu {
 
     void step();
     void run(uint64_t max_instr);
+    void call_subroutine(uint32_t target_addr, uint32_t a0 = 0);
     void halt(const std::string& why) { halted = true; halt_reason = why; }
 
     // COP2 (GTE): implementato in gte.cpp

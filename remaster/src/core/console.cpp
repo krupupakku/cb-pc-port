@@ -31,6 +31,9 @@ void Console::dma_write(uint32_t a, uint32_t v) {
             if (sync == 2) gpu.dma_linked_list(cpu.ram.data(), 0x1FFFFC, madr);
             else if (v & 1) gpu.dma_block(cpu.ram.data(), 0x1FFFFC, madr, words);
             else for (uint32_t i = 0; i < words; i++) { uint32_t w = gpu.gpuread(); std::memcpy(&cpu.ram[(madr + i * 4) & 0x1FFFFC], &w, 4); }
+        } else if (ch == 4) {   // SPU DMA transfer
+            uint32_t bytes = words * 4;
+            spu.dma_write(cpu.ram.data() + (madr & 0x1FFFFC), bytes);
         } else if (ch == 6) {   // ClearOTagR
             uint32_t n = bcr & 0xFFFF, ad = madr;
             for (uint32_t i = 0; i < n; i++, ad -= 4) {
@@ -44,9 +47,20 @@ void Console::dma_write(uint32_t a, uint32_t v) {
 void Console::setup_hw() {
     cpu.io_read = [this](uint32_t a, int size) -> uint32_t {
         if (a < 0x1F801000 || a >= 0x1F803000) return 0;
+        if (a == 0x1F801120) {
+            // Root Counter 2 (SysClock / 8): timer di sistema PS1 usato da Psy-Q libsnd
+            return (uint32_t)((cpu.instr_count / 8) & 0xFFFF);
+        }
         if (a == 0x1F801814) return gpu.gpustat();
         if (a == 0x1F801810) return gpu.gpuread();
-        if (a == 0x1F801DAE) { uint16_t c; std::memcpy(&c, hw + hwoff(0x1F801DAA), 2); return c & 0x3F; }  // SPUSTAT
+        if (a >= 0x1F801C00 && a < 0x1F801E00) {
+            uint32_t lo = spu.read(a);
+            if (size == 4) {
+                uint32_t hi = spu.read(a + 2);
+                return lo | (hi << 16);
+            }
+            return lo;
+        }
         uint32_t v = 0; std::memcpy(&v, hw + hwoff(a), size);
         return v;
     };
@@ -54,6 +68,11 @@ void Console::setup_hw() {
         if (a < 0x1F801000 || a >= 0x1F803000) return;
         if (a == 0x1F801810) { gpu.gp0(v); return; }
         if (a == 0x1F801814) { gpu.gp1(v); return; }
+        if (a >= 0x1F801C00 && a < 0x1F801E00) {
+            spu.write(a, (uint16_t)v);
+            if (size == 4) spu.write(a + 2, (uint16_t)(v >> 16));
+            return;
+        }
         if (a >= 0x1F801080 && a < 0x1F8010F0 && (a & 0xF) == 8) { dma_write(a, v); v &= ~0x01000000u; }
         if (a == 0x1F801070) { uint32_t cur; std::memcpy(&cur, hw + hwoff(a), 4); v = cur & v; }
         std::memcpy(hw + hwoff(a), &v, size);
@@ -62,7 +81,7 @@ void Console::setup_hw() {
 
 void Console::setup_bios() {
     for (uint32_t base : {0xA0u, 0xB0u, 0xC0u}) {
-        cpu.hooks[base] = [this, base](MipsCpu& c) {
+        cpu.hooks[base] = [base](MipsCpu& c) {
             // Eventi BIOS: OpenEvent=B0(08), CloseEvent=B0(09), WaitEvent=B0(0A), TestEvent=B0(0B), EnableEvent=B0(0C)
             static uint32_t evh = 0xF1000000;
             uint32_t fn = c.r[9] & 0xFF;
@@ -82,6 +101,14 @@ void Console::setup_bios() {
         if (mode >= 0) {
             int n = mode ? mode : 1;
             vframes += n; vsync_frames = n; vsync_hit = true;
+
+            // Ticking del sottosistema audio ad ogni frame video (VSync callback PS1)
+            uint8_t* cb_ptr = c.ram_ptr(0x8006D86C);
+            uint32_t sound_callback = 0;
+            if (cb_ptr) std::memcpy(&sound_callback, cb_ptr, 4);
+            if (sound_callback >= 0x80010000 && sound_callback < 0x80080000) {
+                c.call_subroutine(sound_callback);
+            }
         }
         c.r[2] = vframes;
         return true;
@@ -89,7 +116,12 @@ void Console::setup_bios() {
 }
 
 void Console::setup_cd() {
-    cpu.hooks[0x80034AFC] = [](MipsCpu& c) { c.r[2] = 1; return true; };   // CdInit
+    cpu.hooks[0x80034AFC] = [this](MipsCpu& c) {
+        spu.main_vol_l = 0x3FFF;
+        spu.main_vol_r = 0x3FFF;
+        c.r[2] = 1;
+        return true;
+    };   // CdInit
     cpu.hooks[0x800349AC] = [](MipsCpu& c) { c.r[2] = 2; return true; };   // CdSync-like: complete
     cpu.hooks[0x800348A8] = [](MipsCpu& c) { c.r[2] = 0; return true; };   // CdSync(mode,res)
     cpu.hooks[0x80034C4C] = [](MipsCpu& c) { c.r[2] = 0; return true; };

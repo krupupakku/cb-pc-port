@@ -3,6 +3,7 @@
 // del BIOS / libcd (Psy-Q). Il codice del gioco (SCUS_945.70) gira invariato.
 #pragma once
 #include "core/gpu.h"
+#include "core/spu.h"
 #include "core/mips_cpu.h"
 #include <cstdint>
 #include <string>
@@ -13,6 +14,7 @@ class Console {
 public:
     MipsCpu cpu;
     Gpu     gpu;
+    Spu     spu;
     bool    verbose = false;
 
     bool init(const std::string& exePath, const std::string& discBinPath);
