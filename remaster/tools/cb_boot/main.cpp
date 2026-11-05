@@ -181,6 +181,7 @@ int main(int argc, char** argv) {
         else if (vframes >= 330 && vframes < 360) held = 0x0008;  // Start (Salta filmato intro)
         else if (vframes >= 400 && vframes < 430) held = 0x0008;  // Start (Salta dialogo Aku/Uka)
         else if (vframes >= 500 && vframes < 1000) held = 0x1000;  // D-Pad UP: Cammina verso il portale!
+        else if (vframes >= 1020 && vframes < 1040) held = 0x0008; // Start: PAUSA!
 
         uint8_t* p1 = cpu.ram_ptr(0x80063A90);
         uint8_t* p2 = cpu.ram_ptr(0x80063AC4);
@@ -252,17 +253,19 @@ int main(int argc, char** argv) {
 
     // ring buffer degli ultimi PC
     std::map<uint32_t, uint64_t> hist;
+    int font_poly_count = 0;
     while (!cpu.halted && cpu.instr_count < maxi) {
         hist[cpu.pc]++;
         cpu.step();
     }
-    for (uint32_t a = 0; a < 0x200000 - 32; a++) {
-        if (std::memcmp(cpu.ram.data() + a, "BUTTON TO START", 15) == 0) {
-            std::printf("[FOUND STRING] at RAM %08X: '%.30s'\n", 0x80000000 + a - 8, cpu.ram.data() + a - 8);
+    for (uint32_t a = 0; a < 0x200000 - 4; a += 4) {
+        uint32_t val = *(const uint32_t*)(cpu.ram.data() + a);
+        if (val == 0x800B34B8) {
+            std::printf("[PTR TO 'PRESS...'] found at RAM %08X\n", 0x80000000 + a);
         }
     }
     const uint16_t* tbl = (const uint16_t*)(cpu.ram.data() + (0x8005AAB4 & 0x1FFFFF));
-    for (int c = 0xFC; c <= 0xFF; c++) {
+    for (int c = 0xF0; c <= 0xFF; c++) {
         std::printf("[GLYPH TABLE] 0x%02X -> 0x%04X (idx %d)\n", c, tbl[c], tbl[c] & 0xFFF);
     }
     uint32_t pFont = *(const uint32_t*)(cpu.ram.data() + (0x8005B63C & 0x1FFFFF));
@@ -270,22 +273,42 @@ int main(int argc, char** argv) {
         uint32_t sprite_table = *(const uint32_t*)(cpu.ram.data() + ((pFont + 24) & 0x1FFFFF));
         std::printf("[FONT SPRITE TABLE] pFont=%08X sprite_table=%08X\n", pFont, sprite_table);
         if (sprite_table >= 0x80000000 && sprite_table < 0x80200000) {
-            for (int idx : { 98, 100, 101, 102 }) {
+            for (int idx : { 98, 100, 101, 102, 103, 104, 105 }) {
                 uint32_t s_addr = sprite_table + idx * 56;
                 const uint8_t* sp = cpu.ram.data() + (s_addr & 0x1FFFFF);
                 uint16_t tp   = *(const uint16_t*)(sp + 36);
                 uint16_t clut = *(const uint16_t*)(sp + 38);
                 uint8_t u0 = sp[40], v0 = sp[41];
                 uint8_t u1 = sp[42], v1 = sp[43];
-                uint8_t u2 = sp[44], v2 = sp[45];
-                uint8_t u3 = sp[46], v3 = sp[47];
                 uint16_t w_px = *(const uint16_t*)(sp + 8);
                 uint16_t h_px = *(const uint16_t*)(sp + 10);
-                const char* name = (idx == 102) ? "Cross   " : (idx == 98) ? "Square  " : (idx == 101) ? "Triangle" : "Circle  ";
-                std::printf("Sprite %3d [%s]: w=%d h=%d clut=%04X tp=%04X (tpx=%d tpy=%d) u=[%d,%d,%d,%d] v=[%d,%d,%d,%d]\n",
-                    idx, name, w_px, h_px, clut, tp, tp & 15, (tp >> 4) & 1, u0, u1, u2, u3, v0, v1, v2, v3);
+                std::printf("Btn Sprite (idx %3d): w=%d h=%d clut=%04X tp=%04X (tpx=%d tpy=%d depth=%d) u=[%d,%d] v=[%d,%d]\n",
+                    idx, w_px, h_px, clut, tp, tp & 15, (tp >> 4) & 1, (tp >> 7) & 3, u0, u1, v0, sp[45]);
+            }
+            for (char ch : { 'C', 'O', 'N', 'T', 'I', 'U', 'E' }) {
+                uint16_t g = tbl[(uint8_t)ch];
+                int idx = g & 0xFFF;
+                uint32_t s_addr = sprite_table + idx * 56;
+                const uint8_t* sp = cpu.ram.data() + (s_addr & 0x1FFFFF);
+                uint16_t tp   = *(const uint16_t*)(sp + 36);
+                uint16_t clut = *(const uint16_t*)(sp + 38);
+                uint8_t u0 = sp[40], v0 = sp[41];
+                uint8_t u1 = sp[42], v1 = sp[43];
+                uint16_t w_px = *(const uint16_t*)(sp + 8);
+                uint16_t h_px = *(const uint16_t*)(sp + 10);
+                std::printf("Char '%c' (idx %3d): w=%d h=%d clut=%04X tp=%04X (tpx=%d tpy=%d depth=%d) u=[%d,%d] v=[%d,%d]\n",
+                    ch, idx, w_px, h_px, clut, tp, tp & 15, (tp >> 4) & 1, (tp >> 7) & 3, u0, u1, v0, sp[45]);
             }
         }
+    }
+    uint16_t clut_test = 0x57BF;
+    int cx = (clut_test & 63) * 16;
+    int cy = (clut_test >> 6) & 511;
+    std::printf("Raw CLUT 0x%04X at (%d, %d):\n", clut_test, cx, cy);
+    for (int i = 0; i < 16; i++) {
+        uint16_t val = gpu.vram[cy * 1024 + cx + i];
+        std::printf("  [%2d]: 0x%04X (bit15=%d r=%d g=%d b=%d)\n",
+            i, val, (val >> 15) & 1, val & 31, (val >> 5) & 31, (val >> 10) & 31);
     }
     dump_bmp("build/vram_full.bmp", gpu.vram, 0, 0, 1024, 512);
     dump_bmp("build/display.bmp", gpu.vram, gpu.disp_x, gpu.disp_y, gpu.hres, gpu.vres);

@@ -9,6 +9,7 @@
 #include <string>
 #ifdef _WIN32
 #include <windows.h>
+#include <timeapi.h>
 #endif
 
 #include "core/console.h"
@@ -73,6 +74,7 @@ int main(int argc, char* argv[]) {
     std::printf("[Info] Tasti Grafica: F5=Aspect Ratio (4:3 / 16:9 Widescreen 3D Hack), F6=Filtro GLSL (Sharp 4K / CRT / Smooth), F7=Risoluzione Interna (1x / 2x / 4x), F8=Filtro Texture 3D, F11 o Alt+Invio=Schermo Intero.\n\n");
 
 #ifdef _WIN32
+    timeBeginPeriod(1);
     LARGE_INTEGER freq, last, now;
     QueryPerformanceFrequency(&freq);
     QueryPerformanceCounter(&last);
@@ -117,13 +119,25 @@ int main(int argc, char* argv[]) {
                                      g.scale > 1 ? g.hires_vram.data() : nullptr, g.scale);
 
 #ifdef _WIN32
-        // Pacing a ~59.94 Hz (per 'consumed' frame video)
+        // Frame Pacing nativo a 59.94 Hz (30 fps per la logica di gioco quando consumed == 2)
         double target = frameTime * (consumed > 0 ? consumed : 1);
         for (;;) {
             QueryPerformanceCounter(&now);
             double dt = (double)(now.QuadPart - last.QuadPart) / (double)freq.QuadPart;
-            if (dt >= target) { fpsAcc += dt; fpsCnt++; videoFrames += (consumed > 0 ? consumed : 1); cpuAcc += emuSec / target; last = now; break; }
-            if (target - dt > 0.002) Sleep(1);
+            if (dt >= target) {
+                fpsAcc += dt;
+                fpsCnt++;
+                videoFrames += (consumed > 0 ? consumed : 1);
+                cpuAcc += emuSec / target;
+                last = now;
+                break;
+            }
+            double rem = target - dt;
+            if (rem > 0.0025) {
+                Sleep(1);
+            } else if (rem > 0.0005) {
+                Sleep(0);
+            }
         }
         if (fpsAcc >= 1.0) {
             char t[256];
@@ -142,6 +156,10 @@ int main(int argc, char* argv[]) {
         }
 #endif
     }
+
+#ifdef _WIN32
+    timeEndPeriod(1);
+#endif
 
     std::printf("\nShutdown dei sottosistemi...\n");
     cb::netcode::Shutdown();

@@ -109,12 +109,15 @@ void Console::setup_bios() {
             int n = mode ? mode : 1;
             vframes += n; vsync_frames = n; vsync_hit = true;
 
-            // Ticking del sottosistema audio ad ogni frame video (VSync callback PS1)
+            // Ticking del sottosistema audio ad ogni frame video (VSync callback PS1 a 60 Hz).
+            // Nei titoli a 30 fps (mode=2), il BIOS PS1 fa scattare l'interrupt verticale per ciascuno dei frame trascorsi.
             uint8_t* cb_ptr = c.ram_ptr(0x8006D86C);
             uint32_t sound_callback = 0;
             if (cb_ptr) std::memcpy(&sound_callback, cb_ptr, 4);
             if (sound_callback >= 0x80010000 && sound_callback < 0x80080000) {
-                c.call_subroutine(sound_callback);
+                for (int i = 0; i < n; i++) {
+                    c.call_subroutine(sound_callback);
+                }
             }
         }
         c.r[2] = vframes;
