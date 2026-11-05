@@ -180,7 +180,7 @@ int main(int argc, char** argv) {
         else if (vframes >= 270 && vframes < 290) held = 0x4000;  // X (Scelta personaggio: Crash/Cortex)
         else if (vframes >= 330 && vframes < 360) held = 0x0008;  // Start (Salta filmato intro)
         else if (vframes >= 400 && vframes < 430) held = 0x0008;  // Start (Salta dialogo Aku/Uka)
-        else if (vframes >= 500 && vframes < 530) held = 0x0008;  // Start (Apri Menu di Pausa nella Warp Room)
+        else if (vframes >= 500 && vframes < 1000) held = 0x1000;  // D-Pad UP: Cammina verso il portale!
 
         uint8_t* p1 = cpu.ram_ptr(0x80063A90);
         uint8_t* p2 = cpu.ram_ptr(0x80063AC4);
@@ -189,9 +189,11 @@ int main(int argc, char** argv) {
             for (int k = 0; k < 4; k++) {
                 uint8_t* s = p1 + 2 + k * 8;
                 uint16_t raw = (k == 0) ? (uint16_t)~held : 0xFFFF;
-                s[0] = 0x00; s[1] = 0x41;
+                s[0] = 0x00; s[1] = 0x73; // DualShock controller ID (0x73) with analog sticks!
                 s[2] = raw & 0xFF; s[3] = raw >> 8;
-                s[4] = s[5] = s[6] = s[7] = 0x80;
+                s[4] = 128; // LX
+                s[5] = (held & 0x1000) ? 0 : 128; // LY: 0 = full UP!
+                s[6] = s[7] = 128; // RX, RY
             }
         }
         if (p2) p2[0] = 0xFF;
@@ -253,6 +255,37 @@ int main(int argc, char** argv) {
     while (!cpu.halted && cpu.instr_count < maxi) {
         hist[cpu.pc]++;
         cpu.step();
+    }
+    for (uint32_t a = 0; a < 0x200000 - 32; a++) {
+        if (std::memcmp(cpu.ram.data() + a, "BUTTON TO START", 15) == 0) {
+            std::printf("[FOUND STRING] at RAM %08X: '%.30s'\n", 0x80000000 + a - 8, cpu.ram.data() + a - 8);
+        }
+    }
+    const uint16_t* tbl = (const uint16_t*)(cpu.ram.data() + (0x8005AAB4 & 0x1FFFFF));
+    for (int c = 0xFC; c <= 0xFF; c++) {
+        std::printf("[GLYPH TABLE] 0x%02X -> 0x%04X (idx %d)\n", c, tbl[c], tbl[c] & 0xFFF);
+    }
+    uint32_t pFont = *(const uint32_t*)(cpu.ram.data() + (0x8005B63C & 0x1FFFFF));
+    if (pFont >= 0x80000000 && pFont < 0x80200000) {
+        uint32_t sprite_table = *(const uint32_t*)(cpu.ram.data() + ((pFont + 24) & 0x1FFFFF));
+        std::printf("[FONT SPRITE TABLE] pFont=%08X sprite_table=%08X\n", pFont, sprite_table);
+        if (sprite_table >= 0x80000000 && sprite_table < 0x80200000) {
+            for (int idx : { 98, 100, 101, 102 }) {
+                uint32_t s_addr = sprite_table + idx * 56;
+                const uint8_t* sp = cpu.ram.data() + (s_addr & 0x1FFFFF);
+                uint16_t tp   = *(const uint16_t*)(sp + 36);
+                uint16_t clut = *(const uint16_t*)(sp + 38);
+                uint8_t u0 = sp[40], v0 = sp[41];
+                uint8_t u1 = sp[42], v1 = sp[43];
+                uint8_t u2 = sp[44], v2 = sp[45];
+                uint8_t u3 = sp[46], v3 = sp[47];
+                uint16_t w_px = *(const uint16_t*)(sp + 8);
+                uint16_t h_px = *(const uint16_t*)(sp + 10);
+                const char* name = (idx == 102) ? "Cross   " : (idx == 98) ? "Square  " : (idx == 101) ? "Triangle" : "Circle  ";
+                std::printf("Sprite %3d [%s]: w=%d h=%d clut=%04X tp=%04X (tpx=%d tpy=%d) u=[%d,%d,%d,%d] v=[%d,%d,%d,%d]\n",
+                    idx, name, w_px, h_px, clut, tp, tp & 15, (tp >> 4) & 1, u0, u1, u2, u3, v0, v1, v2, v3);
+            }
+        }
     }
     dump_bmp("build/vram_full.bmp", gpu.vram, 0, 0, 1024, 512);
     dump_bmp("build/display.bmp", gpu.vram, gpu.disp_x, gpu.disp_y, gpu.hres, gpu.vres);

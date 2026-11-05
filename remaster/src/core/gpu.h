@@ -79,4 +79,8 @@ private:
     int rx = 0, ry = 0, rw = 0, rh = 0, rpos = 0;
 };
 
+// Callback opzionale per la sostituzione dinamica dei glifi dei pulsanti con icone HD
+using ButtonGlyphSampler = bool (*)(int btnIndex, float nu, float nv, uint8_t& outR, uint8_t& outG, uint8_t& outB, uint8_t& outA);
+void SetButtonGlyphSampler(ButtonGlyphSampler sampler);
+
 } // namespace cb

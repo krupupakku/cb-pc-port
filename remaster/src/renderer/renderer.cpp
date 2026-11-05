@@ -1,4 +1,6 @@
 #include "renderer/renderer.h"
+#include "renderer/prompt_overlay.h"
+#include "core/gpu.h"
 #include "input/input_manager.h"
 
 #include <cmath>
@@ -260,6 +262,14 @@ static LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM l
                 ToggleBilinearTextures();
                 return 0;
             }
+            if (wParam == VK_F9) {
+                cb::ui::CyclePromptDevice();
+                return 0;
+            }
+            if (wParam == VK_F10) {
+                cb::ui::TogglePromptOverlay();
+                return 0;
+            }
             if (wParam == VK_F11) {
                 ToggleFullscreen();
                 return 0;
@@ -511,12 +521,14 @@ bool Initialize(uint32_t internalWidth, uint32_t internalHeight, bool widescreen
     LoadGlExtensions();
     InitShaders();
     LoadLogoTexture();
+    cb::ui::Initialize();
+    cb::SetButtonGlyphSampler(cb::ui::SampleButtonGlyph);
     g_running = true;
 #endif
 
     std::printf("[Renderer] Finestra OpenGL attiva (Pipeline interna %ux%u, Aspect Ratio %s)\n",
         g_internalWidth, g_internalHeight, g_widescreen ? "16:9 Widescreen" : "4:3 Originale");
-    std::printf("[Renderer] Tasti rapidi video: F5 = Aspect Ratio | F6 = Filtri HD/CRT/Smooth | F11 o Alt+Invio = Schermo Intero\n");
+    std::printf("[Renderer] Tasti rapidi: F5 = Aspect Ratio | F6 = Filtri HD/CRT | F7 = Risoluzione 4K | F8 = Bilineare | F9 = Stile Tasti (Xbox/PS/KB) | F10 = Prompt HUD | F11 = Schermo Intero\n");
     return true;
 }
 
@@ -531,6 +543,7 @@ void Shutdown() {
         glDeleteTextures(1, &g_logoTex);
         g_logoTex = 0;
     }
+    cb::ui::Shutdown();
     if (g_hglrc) {
         wglMakeCurrent(nullptr, nullptr);
         wglDeleteContext(g_hglrc);
@@ -808,6 +821,9 @@ void PresentPsxFrame(const uint16_t* vram, int x0, int y0, int w, int h, bool en
 
         if (g_shadersSupported && glUseProgram_ptr) glUseProgram_ptr(0);
         glDisable(GL_TEXTURE_2D);
+
+        // Rendering dell'overlay HD dei prompt dinamici dei comandi (Xbox / PlayStation / Tastiera)
+        cb::ui::Render(g_winWidth, g_winHeight, 1.0f);
     }
     if (g_hdc) SwapBuffers(g_hdc);
 #else

@@ -72,8 +72,13 @@ This roadmap outlines the technical roadmap for bringing *Crash Bash* from its o
   - Dual-motor actuator emulation (high-frequency small motor buzz, low-frequency large motor heavy rumble).
   - Direct integration with Eurocom's internal game actuator state (`_controllers` array at `0x80051338`, stride `0x58`) and BIOS `PadSetAct` (`0x800363AC`).
   - Full synchronization with the in-game Options menu toggle ("Vibration: ON / OFF").
-- [ ] **Dynamic On-Screen Button Prompts:**
-  - Display context-aware Xbox / PlayStation glyphs based on connected input device.
+- [x] **Dynamic On-Screen Button Prompts & In-Game Texture Replacement (`remaster/src/renderer/prompt_overlay.cpp` & `gpu.cpp`):**
+  - **In-Engine Texture Replacement:** Native injection directly into the Eurocom font atlas (Texture Page 14 & 15). All 3D banners (`PRESS [A] BUTTON TO START`, `PRESS [Y] BUTTON TO EXIT`), dialogs, tutorial hints, and menu prompts display the active controller's button icons directly in-game instead of original PS1 glyphs.
+  - Crisp HD vector glyphs imported from Kenney Input Prompts (`assets_hd/ui/{xbox, playstation, keyboard}`).
+  - Real-time automatic device detection: seamlessly switches between Xbox, PlayStation, and Keyboard glyphs as soon as the user touches a controller or key.
+  - Manual override toggle via hotkey **F9** (Auto $\to$ Xbox $\to$ PlayStation $\to$ Keyboard).
+  - Optional bottom HUD prompt bar toggleable via **F10** (disabled by default to maintain clean screen presentation).
+  - Window title status reporting active prompt style.
 - [x] **Audio Subsystem (`remaster/src/audio/` & `remaster/src/core/spu.cpp`):**
   - 24-channel SPU ADPCM sound synthesis and voice mixing.
   - Hardware Timer 2 calibrated to 60Hz to prevent audio desynchronization and sluggish playback.

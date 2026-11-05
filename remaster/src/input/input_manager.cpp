@@ -1,4 +1,5 @@
 #include "input/input_manager.h"
+#include "renderer/prompt_overlay.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -112,12 +113,15 @@ void PollControllers() {
                 if (lx >  16000) held |= CB_BTN_RIGHT;
                 if (lx < -16000) held |= CB_BTN_LEFT;
             }
+            if (held != CB_BTN_NONE || analogActive) {
+                cb::ui::NotifyInputActivity(true, false);
+            }
         } else {
             SetVibration(i, 0, 0);
         }
 
-        // Fallback Tastiera su Player 1 per test rapido anche senza pad collegato
-        if (i == 0 && !connected) {
+        // Supporto Tastiera su Player 1 (combinabile o fallback)
+        if (i == 0) {
             uint32_t kbHeld = CB_BTN_NONE;
             if (GetAsyncKeyState(VK_UP)    & 0x8000 || GetAsyncKeyState('W') & 0x8000) kbHeld |= CB_BTN_UP;
             if (GetAsyncKeyState(VK_DOWN)  & 0x8000 || GetAsyncKeyState('S') & 0x8000) kbHeld |= CB_BTN_DOWN;
@@ -131,8 +135,9 @@ void PollControllers() {
             if (GetAsyncKeyState(VK_RETURN)& 0x8000) kbHeld |= CB_BTN_START;
 
             if (kbHeld != CB_BTN_NONE) {
+                cb::ui::NotifyInputActivity(false, true);
                 connected = true;
-                held = kbHeld;
+                held |= kbHeld;
             }
         }
 #endif

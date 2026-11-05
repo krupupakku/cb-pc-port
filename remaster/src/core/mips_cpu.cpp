@@ -16,6 +16,12 @@ uint8_t* MipsCpu::ram_ptr(uint32_t vaddr) {
 }
 
 uint32_t MipsCpu::read(uint32_t vaddr, int size) {
+    if ((vaddr & 0xFFFFFF) == 0x0B34BE) {
+        static int count = 0;
+        if (count++ < 10) {
+            std::printf("[READ GLYPH 0xFC] pc=%08X ra=%08X\n", pc, r[31]);
+        }
+    }
     uint8_t* p = ram_ptr(vaddr);
     if (p) {
         if (size == 4) return *reinterpret_cast<const uint32_t*>(p);

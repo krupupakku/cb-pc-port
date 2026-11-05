@@ -21,6 +21,12 @@ cmake -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release -S $SrcDir -B $BuildDir
 Write-Host "`n=== Compilazione Eseguibili (cb_extract, cb_model2obj, crashbash_remaster) ===" -ForegroundColor Cyan
 cmake --build $BuildDir --parallel
 
+# Sincronizza gli asset HD nella cartella di build
+$srcAssets = Join-Path $SrcDir "assets_hd"
+if (Test-Path $srcAssets) {
+    Copy-Item -Path $srcAssets -Destination $BuildDir -Recurse -Force
+}
+
 Write-Host "`n[OK] Build completata in: $BuildDir" -ForegroundColor Green
 Get-ChildItem $BuildDir -Filter "*.exe" | Select-Object Name, Length, LastWriteTime
 

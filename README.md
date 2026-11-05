@@ -95,11 +95,13 @@ The resulting executables will be placed in `build/`:
   - **Triangle ($\triangle$):** `V` or Gamepad `Y`
   - **Start:** `Enter` or Gamepad `Start`
   - **Select:** `Space` or Gamepad `Back`
-- **Graphics Hotkeys:**
+- **Graphics & Input Hotkeys:**
   - **`F5`**: Toggle Aspect Ratio (Original 4:3 $\leftrightarrow$ 16:9 3D Widescreen Hack)
   - **`F6`**: Cycle Post-Processing Filter (Sharp 4K $\to$ CRT Scanlines $\to$ Smooth Bilinear)
   - **`F7`**: Cycle Internal Resolution (1x Native $\to$ 2x HD $\to$ 3x Super HD $\to$ 4x Ultra HD 4K)
   - **`F8`**: Toggle 3D Polygon Bilinear Texture Filtering
+  - **`F9`**: Cycle Dynamic On-Screen Button Prompts (`Auto` $\to$ `Xbox` $\to$ `PlayStation` $\to$ `Keyboard`)
+  - **`F10`**: Toggle On-Screen Prompt HUD Bar (Show / Hide)
   - **`F11`** or **`Alt + Enter`**: Toggle Borderless Fullscreen
 
 ---
@@ -109,3 +111,4 @@ The resulting executables will be placed in `build/`:
 - **[mateusfavarin/crashbash](https://github.com/mateusfavarin/crashbash):** C decompilation work and symbol mapping for *Crash Bash (PSX)*.
 - **[xan1242/CrashBashEx](https://github.com/xan1242/CrashBashEx):** File unpacker and format specifications for `CRASHBSH.DAT`.
 - **[Helias/Crash-Bandicoot-Resources](https://github.com/Helias/Crash-Bandicoot-Resources):** Reverse engineering documentation across the *Crash Bandicoot* franchise.
+- **[Kenney](https://kenney.nl/assets/input-prompts):** Clean vector Input Prompts asset pack for modern gamepad and keyboard glyphs.

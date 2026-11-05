@@ -13,6 +13,7 @@
 
 #include "core/console.h"
 #include "renderer/renderer.h"
+#include "renderer/prompt_overlay.h"
 #include "input/input_manager.h"
 #include "audio/audio_manager.h"
 #include "netcode/rollback_manager.h"
@@ -126,13 +127,14 @@ int main(int argc, char* argv[]) {
         }
         if (fpsAcc >= 1.0) {
             char t[256];
-            std::snprintf(t, sizeof t, "Crash Bash: Remaster+ | %s (3D Widescreen: %s) | Res Interna: %s | %s | %dx%d | video %.1f Hz | gioco %.1f fps | CPU emu %.0f%%%s%s",
+            std::snprintf(t, sizeof t, "Crash Bash: Remaster+ | %s | %s | %s | %dx%d | Prompt: %s | video %.1f Hz | gioco %.1f fps | CPU %.0f%%%s%s",
                           cb::renderer::GetAspectRatioName(),
-                          cb::renderer::IsWidescreenHackEnabled() ? "ATTIVO" : "OFF",
                           cb::renderer::GetInternalResolutionName(),
                           cb::renderer::GetVideoFilterName(),
                           g.hres * g.scale, g.vres * g.scale,
-                          videoFrames / fpsAcc, fpsCnt / fpsAcc, 100.0 * cpuAcc / (fpsCnt ? fpsCnt : 1),
+                          cb::ui::GetPromptDeviceName(),
+                          videoFrames / fpsAcc, fpsCnt / fpsAcc,
+                          100.0 * cpuAcc / (fpsCnt ? fpsCnt : 1),
                           cb::renderer::IsFullscreen() ? " | FS" : "",
                           halted ? " | CPU FERMA" : "");
             cb::renderer::SetWindowTitle(t);

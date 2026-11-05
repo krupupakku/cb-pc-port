@@ -49,8 +49,16 @@ endif()
 
 # =============================================================================
 # 2b. Tool: cb_boot (boot headless di SCUS_945.70 con interprete MIPS)
-add_executable(cb_boot tools/cb_boot/main.cpp src/core/mips_cpu.cpp src/core/gte.cpp src/core/gpu.cpp src/core/spu.cpp)
-target_include_directories(cb_boot PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+add_executable(cb_boot
+    tools/cb_boot/main.cpp
+    src/core/mips_cpu.cpp
+    src/core/gte.cpp
+    src/core/gpu.cpp
+    src/core/spu.cpp
+)
+target_include_directories(cb_boot PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
 
 # =============================================================================
 # 3. Engine Principale: crashbash_remaster (PC Native Port & Remaster+)
@@ -63,6 +71,7 @@ add_executable(crashbash_remaster
     src/core/spu.cpp
     src/core/console.cpp
     src/renderer/renderer.cpp
+    src/renderer/prompt_overlay.cpp
     src/input/input_manager.cpp
     src/audio/audio_manager.cpp
     src/netcode/rollback_manager.cpp

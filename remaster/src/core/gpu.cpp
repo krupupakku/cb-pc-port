@@ -11,6 +11,11 @@
 
 namespace cb {
 
+static ButtonGlyphSampler s_glyphSampler = nullptr;
+void SetButtonGlyphSampler(ButtonGlyphSampler sampler) {
+    s_glyphSampler = sampler;
+}
+
 static inline int sx11(uint32_t v) { return ((int)(v << 21)) >> 21; }
 static inline uint32_t rd32(uint8_t* ram, uint32_t mask, uint32_t a) {
     uint32_t v;
@@ -515,6 +520,43 @@ void Gpu::hires_tri(const HCmd& cmd, int by0, int by1) {
             if (cmd.textured) {
                 float uf = (float)a.u * fa + (float)b.u * fb + (float)d.u * fc;
                 float vf = (float)a.v * fa + (float)b.v * fb + (float)d.v * fc;
+
+                // Sostituzione in-game dei glifi dei pulsanti con le texture HD del controller attivo (Xbox / PlayStation / Tastiera)
+                // SCUS_945.70 Font Sprite Table (tpx=1, tpy=1, v=240..255, w=32, h=16):
+                // 102 [Cross]:    u=64..95,   v=240..255 -> btn 0 (Xbox A, KB Space)
+                // 101 [Triangle]: u=96..127,  v=240..255 -> btn 2 (Xbox Y, KB V)
+                // 100 [Circle]:   u=128..159, v=240..255 -> btn 3 (Xbox B, KB C)
+                //  98 [Square]:   u=160..191, v=240..255 -> btn 1 (Xbox X, KB X)
+                if (cmd.ctpx == 1 && cmd.ctpy == 1 && vf >= 239.0f && vf <= 256.0f) {
+                    int btn = -1;
+                    float u0 = 0.0f;
+                    if (uf >= 64.0f && uf < 96.0f)        { btn = 0; u0 = 64.0f; }
+                    else if (uf >= 96.0f && uf < 128.0f)  { btn = 2; u0 = 96.0f; }
+                    else if (uf >= 128.0f && uf < 160.0f) { btn = 3; u0 = 128.0f; }
+                    else if (uf >= 160.0f && uf < 192.0f) { btn = 1; u0 = 160.0f; }
+
+                    if (btn >= 0) {
+                        float nu = std::clamp((uf - u0) * (1.0f / 31.0f), 0.0f, 1.0f);
+                        float nv = std::clamp((vf - 240.0f) * (1.0f / 15.0f), 0.0f, 1.0f);
+                        uint8_t br, bg, bb, ba;
+                        if (s_glyphSampler && s_glyphSampler(btn, nu, nv, br, bg, bb, ba)) {
+                            if (ba < 10) continue; // Trasparente fuori dal cerchio del pulsante
+                            if (ba < 255) {
+                                uint32_t dst = row[x];
+                                uint32_t dr = dst & 0xFF, dg = (dst >> 8) & 0xFF, db = (dst >> 16) & 0xFF;
+                                uint32_t invA = 255 - ba;
+                                r = (br * ba + dr * invA) / 255;
+                                g = (bg * ba + dg * invA) / 255;
+                                bl = (bb * ba + db * invA) / 255;
+                            } else {
+                                r = br; g = bg; bl = bb;
+                            }
+                            row[x] = 0xFF000000u | ((uint32_t)bl << 16) | ((uint32_t)g << 8) | (uint32_t)r;
+                            continue;
+                        }
+                    }
+                }
+
                 int tr, tg, tb;
                 uint16_t t;
                 if (ts.bilinear) {
@@ -574,6 +616,28 @@ void Gpu::raster_tri(const V& a0, const V& b0, const V& c0, bool gouraud, bool t
         if (textured) {
             int u = (int)std::floor(a.u * fa + b.u * fb + c.u * fc);
             int v = (int)std::floor(a.v * fa + b.v * fb + c.v * fc);
+
+            // Sostituzione in-game dei glifi dei pulsanti con le texture HD del controller attivo (Xbox / PlayStation / Tastiera)
+            if (ctpx == 1 && ctpy == 1 && v >= 239 && v <= 256) {
+                int btn = -1;
+                float u0 = 0.0f;
+                if (u >= 64 && u < 96)        { btn = 0; u0 = 64.0f; }  // Cross (Xbox A / KB Space)
+                else if (u >= 96 && u < 128)  { btn = 2; u0 = 96.0f; }  // Triangle (Xbox Y / KB V)
+                else if (u >= 128 && u < 160) { btn = 3; u0 = 128.0f; } // Circle (Xbox B / KB C)
+                else if (u >= 160 && u < 192) { btn = 1; u0 = 160.0f; } // Square (Xbox X / KB X)
+
+                if (btn >= 0) {
+                    float nu = std::clamp(((float)u - u0) * (1.0f / 31.0f), 0.0f, 1.0f);
+                    float nv = std::clamp(((float)v - 240.0f) * (1.0f / 15.0f), 0.0f, 1.0f);
+                    uint8_t br, bg, bb, ba;
+                    if (s_glyphSampler && s_glyphSampler(btn, nu, nv, br, bg, bb, ba)) {
+                        if (ba < 10) continue;
+                        put_pixel(x, y, br, bg, bb, semi, csemi, false);
+                        continue;
+                    }
+                }
+            }
+
             uint16_t t = fetch_tex(u, v, clut, ctpx, ctpy, cdepth);
             if (t == 0) continue;
             int tr = (t & 31) << 3, tg = ((t >> 5) & 31) << 3, tb = ((t >> 10) & 31) << 3;
@@ -653,6 +717,35 @@ void Gpu::draw_rect(int sizeMode, bool textured, bool semi, bool raw) {
         for (int k = 0; k < w; k++) {
             int pr = r, pg = g, pb = b; bool texsemi = true;
             if (textured) {
+                if (tpx == 1 && tpy == 1 && (v0 + j) >= 239 && (v0 + j) <= 256) {
+                    int u = u0 + k;
+                    int btn = -1;
+                    float ub0 = 0.0f;
+                    if (u >= 64 && u < 96)        { btn = 0; ub0 = 64.0f; }  // Cross
+                    else if (u >= 96 && u < 128)  { btn = 2; ub0 = 96.0f; }  // Triangle
+                    else if (u >= 128 && u < 160) { btn = 3; ub0 = 128.0f; } // Circle
+                    else if (u >= 160 && u < 192) { btn = 1; ub0 = 160.0f; } // Square
+
+                    if (btn >= 0) {
+                        float nu = std::clamp(((float)u - ub0) * (1.0f / 31.0f), 0.0f, 1.0f);
+                        float nv = std::clamp(((float)(v0 + j) - 240.0f) * (1.0f / 15.0f), 0.0f, 1.0f);
+                        uint8_t br, bg, bb, ba;
+                        if (s_glyphSampler && s_glyphSampler(btn, nu, nv, br, bg, bb, ba)) {
+                            if (ba < 10) continue;
+                            pr = br; pg = bg; pb = bb;
+                            put_pixel(x + k, y + j, pr, pg, pb, semi, semi_mode, false);
+                            if (scale > 1 && !hires_vram.empty()) {
+                                for (int dy = 0; dy < scale; dy++) {
+                                    for (int dx = 0; dx < scale; dx++) {
+                                        put_pixel_hires((x + k) * scale + dx, (y + j) * scale + dy, pr, pg, pb, semi, semi_mode, false);
+                                    }
+                                }
+                            }
+                            continue;
+                        }
+                    }
+                }
+
                 uint16_t t = fetch_tex(u0 + k, v0 + j, clut, tpx, tpy, tex_depth);
                 if (t == 0) continue; // Trasparente (pixel 0 skip)
                 int tr = (t & 31) << 3, tg = ((t >> 5) & 31) << 3, tb = ((t >> 10) & 31) << 3;
