@@ -97,6 +97,23 @@ void MipsCpu::step() {
         std::memcpy(&ram[0x569D8], &b68c, 4);
     }
 
+    // Crash Bash Memory Card I/O Completion Sync:
+    // Evita il blocco o attesa infinita degli eventi hardware della memory card:
+    // Slot 1: 0x80047620 (wait loop IOE), 0x800477C4 (event check IOE)
+    // Slot 2: 0x800476F8 (wait loop TIMEOUT), 0x80047800 (event check TIMEOUT)
+    // MemCardSync(0) blocking wait loop: 0x8003A818 (avanza il ticker della card)
+    if (pc == 0x80047620 || pc == 0x800477C4) {
+        uint32_t one = 1;
+        std::memcpy(&ram[0x78800], &one, 4); // Slot 1 IOE = 1 (Operazione completata con successo)
+    }
+    if (pc == 0x800476F8 || pc == 0x80047800) {
+        uint32_t one = 1;
+        std::memcpy(&ram[0x78818], &one, 4); // Slot 2 TIMEOUT = 1 (Nessuna card nello Slot 2)
+    }
+    if (pc == 0x8003A818) {
+        call_subroutine(0x8003AAA4);
+    }
+
     // Hook HLE: controllo rapido dell'intervallo prima della lookup hash
     if (pc < 0x200 || (pc >= 0x80030000 && pc < 0x80040000)) {
         auto it = hooks.find(pc);

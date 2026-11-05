@@ -14,6 +14,7 @@ bool Console::init(const std::string& exePath, const std::string& discBinPath) {
     if (!cpu.load_psx_exe(exePath)) { std::printf("[console] impossibile caricare %s\n", exePath.c_str()); return false; }
     disc = std::fopen(discBinPath.c_str(), "rb");
     if (!disc) { std::printf("[console] disco non trovato: %s\n", discBinPath.c_str()); return false; }
+    memcard.init("saves/crashbash_slot1.mcr");
     setup_hw();
     setup_bios();
     setup_cd();
@@ -86,16 +87,180 @@ void Console::setup_hw() {
     };
 }
 
+void Console::trigger_bios_event(MipsCpu& c, uint32_t ev_class, uint32_t ev_spec) {
+    (void)c;
+    for (auto& [id, ev] : bios_events) {
+        if (ev.ev_class == ev_class && ev.ev_spec == ev_spec && ev.enabled) {
+            ev.triggered = true;
+        }
+    }
+}
+
 void Console::setup_bios() {
     for (uint32_t base : {0xA0u, 0xB0u, 0xC0u}) {
-        cpu.hooks[base] = [base](MipsCpu& c) {
-            // Eventi BIOS: OpenEvent=B0(08), CloseEvent=B0(09), WaitEvent=B0(0A), TestEvent=B0(0B), EnableEvent=B0(0C)
+        cpu.hooks[base] = [this, base](MipsCpu& c) {
             static uint32_t evh = 0xF1000000;
             uint32_t fn = c.r[9] & 0xFF;
             c.r[2] = 0;
+
             if (base == 0xB0) {
-                if (fn == 0x08) c.r[2] = evh++;
-                else if (fn >= 0x09 && fn <= 0x0C) c.r[2] = 1;
+                // Eventi BIOS: OpenEvent=B0(08), CloseEvent=B0(09), WaitEvent=B0(0A), TestEvent=B0(0B), EnableEvent=B0(0C)
+                if (fn == 0x08) {
+                    uint32_t id = evh++;
+                    bios_events[id] = { c.r[4], c.r[5], c.r[6], c.r[7], false, false };
+                    c.r[2] = id;
+                    return true;
+                }
+                if (fn == 0x09) {
+                    bios_events.erase(c.r[4]);
+                    c.r[2] = 1;
+                    return true;
+                }
+                if (fn == 0x0A) {
+                    auto it = bios_events.find(c.r[4]);
+                    if (it != bios_events.end()) it->second.triggered = false;
+                    c.r[2] = 1;
+                    return true;
+                }
+                if (fn == 0x0B) {
+                    // TestEvent: ritorna 1 per evitare lo stallo nel loop di attesa eventi (es. 0x80037F9C)
+                    c.r[2] = 1;
+                    return true;
+                }
+                if (fn == 0x0C) {
+                    auto it = bios_events.find(c.r[4]);
+                    if (it != bios_events.end()) it->second.enabled = true;
+                    c.r[2] = 1;
+                    return true;
+                }
+                if (fn == 0x0D) {
+                    auto it = bios_events.find(c.r[4]);
+                    if (it != bios_events.end()) it->second.enabled = false;
+                    c.r[2] = 1;
+                    return true;
+                }
+
+                // Emulazione Memory Card (libmcrd / Psy-Q)
+                if (fn == 0x4A) { // _card_info(port)
+                    uint32_t port = c.r[4] & 0x10;
+                    if (port == 0) { // Slot 1: Presente e pronta
+                        trigger_bios_event(c, 0xF4000001, 0x0004);
+                        uint8_t* ram_ioe = c.ram_ptr(0x80078800);
+                        if (ram_ioe) { uint32_t one = 1; std::memcpy(ram_ioe, &one, 4); }
+                        c.r[2] = 1;
+                    } else { // Slot 2: Nessun dispositivo (Timeout)
+                        trigger_bios_event(c, 0xF0000011, 0x0100);
+                        uint8_t* ram_timout = c.ram_ptr(0x80078818);
+                        if (ram_timout) { uint32_t one = 1; std::memcpy(ram_timout, &one, 4); }
+                        c.r[2] = 1;
+                    }
+                    return true;
+                }
+                if (fn == 0x4B) { // _card_load(port)
+                    uint32_t port = c.r[4] & 0x10;
+                    if (port == 0) {
+                        memcard.load(0);
+                        trigger_bios_event(c, 0xF4000001, 0x0004);
+                        uint8_t* ram_ioe = c.ram_ptr(0x80078800);
+                        if (ram_ioe) { uint32_t one = 1; std::memcpy(ram_ioe, &one, 4); }
+                        c.r[2] = 1;
+                    } else {
+                        trigger_bios_event(c, 0xF0000011, 0x0100);
+                        c.r[2] = 0;
+                    }
+                    return true;
+                }
+                if (fn == 0x4C || fn == 0x4D || fn == 0x4E || fn == 0x50 || fn == 0x53) {
+                    c.r[2] = 1;
+                    return true;
+                }
+                if (fn == 0x4F) { // _card_format(port)
+                    uint32_t port = c.r[4] & 0x10;
+                    if (port == 0 && memcard.format(0)) {
+                        trigger_bios_event(c, 0xF4000001, 0x0004);
+                        uint8_t* ram_ioe = c.ram_ptr(0x80078800);
+                        if (ram_ioe) { uint32_t one = 1; std::memcpy(ram_ioe, &one, 4); }
+                        c.r[2] = 1;
+                    } else {
+                        c.r[2] = 0;
+                    }
+                    return true;
+                }
+                if (fn == 0x51) { // _card_write(port, sector, buf)
+                    uint32_t port = c.r[4] & 0x10;
+                    uint32_t sec = c.r[5];
+                    uint8_t* buf = c.ram_ptr(c.r[6]);
+                    if (port == 0 && buf && memcard.write_sector(0, sec, buf)) {
+                        trigger_bios_event(c, 0xF4000001, 0x0004);
+                        uint8_t* ram_ioe = c.ram_ptr(0x80078800);
+                        if (ram_ioe) { uint32_t one = 1; std::memcpy(ram_ioe, &one, 4); }
+                        c.r[2] = 1;
+                    } else {
+                        c.r[2] = 0;
+                    }
+                    return true;
+                }
+                if (fn == 0x52) { // _card_read(port, sector, buf)
+                    uint32_t port = c.r[4] & 0x10;
+                    uint32_t sec = c.r[5];
+                    uint8_t* buf = c.ram_ptr(c.r[6]);
+                    if (port == 0 && buf && memcard.read_sector(0, sec, buf)) {
+                        trigger_bios_event(c, 0xF4000001, 0x0004);
+                        uint8_t* ram_ioe = c.ram_ptr(0x80078800);
+                        if (ram_ioe) { uint32_t one = 1; std::memcpy(ram_ioe, &one, 4); }
+                        c.r[2] = 1;
+                    } else {
+                        c.r[2] = 0;
+                    }
+                    return true;
+                }
+                if (fn == 0x56 || fn == 0x57 || fn == 0x5B) {
+                    c.r[2] = 1;
+                    return true;
+                }
+            } else if (base == 0xA0) {
+                if (fn == 0xAB) { // A0(0xAB) = _card_info
+                    uint32_t port = c.r[4] & 0x10;
+                    if (port == 0) {
+                        trigger_bios_event(c, 0xF4000001, 0x0004);
+                        uint8_t* ram_ioe = c.ram_ptr(0x80078800);
+                        if (ram_ioe) { uint32_t one = 1; std::memcpy(ram_ioe, &one, 4); }
+                        c.r[2] = 1;
+                    } else {
+                        trigger_bios_event(c, 0xF0000011, 0x0100);
+                        uint8_t* ram_timout = c.ram_ptr(0x80078818);
+                        if (ram_timout) { uint32_t one = 1; std::memcpy(ram_timout, &one, 4); }
+                        c.r[2] = 1;
+                    }
+                    return true;
+                }
+                if (fn == 0xAC) { // A0(0xAC) = _card_load
+                    uint32_t port = c.r[4] & 0x10;
+                    if (port == 0) {
+                        memcard.load(0);
+                        trigger_bios_event(c, 0xF4000001, 0x0004);
+                        uint8_t* ram_ioe = c.ram_ptr(0x80078800);
+                        if (ram_ioe) { uint32_t one = 1; std::memcpy(ram_ioe, &one, 4); }
+                        c.r[2] = 1;
+                    } else {
+                        trigger_bios_event(c, 0xF0000011, 0x0100);
+                        c.r[2] = 0;
+                    }
+                    return true;
+                }
+                if (fn == 0x39 || fn == 0x49 || fn == 0x70 || fn == 0x71 || fn == 0x72) {
+                    c.r[2] = 1;
+                    return true;
+                }
+                if (fn == 0x44) {
+                    c.r[2] = 0; // Nessun bad sector
+                    return true;
+                }
+            } else if (base == 0xC0) {
+                if (fn == 0x02 || fn == 0x03 || fn == 0x0A) {
+                    c.r[2] = 1;
+                    return true;
+                }
             }
             return true;
         };
@@ -109,8 +274,9 @@ void Console::setup_bios() {
             int n = mode ? mode : 1;
             vframes += n; vsync_frames = n; vsync_hit = true;
 
-            // Ticking del sottosistema audio ad ogni frame video (VSync callback PS1 a 60 Hz).
-            // Nei titoli a 30 fps (mode=2), il BIOS PS1 fa scattare l'interrupt verticale per ciascuno dei frame trascorsi.
+            // Ticking dei sottosistemi periodici ad ogni frame video (VSync callback PS1 a 60 Hz):
+            // 1. Callback audio registrata a 0x8006D86C
+            // 2. Callback driver Memory Card Psy-Q registrata a 0x8003AAA4
             uint8_t* cb_ptr = c.ram_ptr(0x8006D86C);
             uint32_t sound_callback = 0;
             if (cb_ptr) std::memcpy(&sound_callback, cb_ptr, 4);
@@ -119,6 +285,7 @@ void Console::setup_bios() {
                     c.call_subroutine(sound_callback);
                 }
             }
+            c.call_subroutine(0x8003AAA4);
         }
         c.r[2] = vframes;
         return true;
@@ -241,6 +408,26 @@ int Console::run_frame(uint64_t max_instr) {
     if (cpu.halted) return 0;
     frame_start_instr = cpu.instr_count;
     write_pads();
+
+    // Segnala costantemente timeout su Slot 2 (nessun dispositivo) per evitare attese della coda Psy-Q
+    uint8_t* mc2 = cpu.ram_ptr(0x80078818);
+    if (mc2) {
+        uint32_t one = 1;
+        std::memcpy(mc2, &one, 4);
+    }
+
+    // Stato Memory Card per Crash Bash:
+    // 0x800655C0: Bit 1 (0x02) = Presente, Bit 2 (0x04) = Formattata, Bit 4/5 (0x10/0x20) = Pronta/Valida
+    // 0x80065E24: Contatore generazione directory (deve essere >= 1 affinche 991.code.bin popoli gli slot)
+    uint8_t* mc1 = cpu.ram_ptr(0x800655C0);
+    if (mc1) {
+        *(uint32_t*)mc1 |= 0x0036;
+    }
+    uint8_t* mc_e24 = cpu.ram_ptr(0x80065E24);
+    if (mc_e24 && *(uint32_t*)mc_e24 == 0) {
+        *(uint32_t*)mc_e24 = 1;
+    }
+
     vsync_hit = false;
     uint64_t end = cpu.instr_count + max_instr;
     while (!cpu.halted && !vsync_hit && cpu.instr_count < end) cpu.step();

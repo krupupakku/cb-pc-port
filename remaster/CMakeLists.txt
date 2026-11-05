@@ -70,6 +70,7 @@ set(CRASHBASH_REMASTER_SRCS
     src/core/gpu.cpp
     src/core/spu.cpp
     src/core/console.cpp
+    src/core/memory_card.cpp
     src/renderer/renderer.cpp
     src/renderer/prompt_overlay.cpp
     src/input/input_manager.cpp

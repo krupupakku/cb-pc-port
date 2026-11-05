@@ -5,7 +5,9 @@
 #include "core/gpu.h"
 #include "core/spu.h"
 #include "core/mips_cpu.h"
+#include "core/memory_card.h"
 #include <cstdint>
+#include <map>
 #include <string>
 
 namespace cb {
@@ -15,6 +17,7 @@ public:
     MipsCpu cpu;
     Gpu     gpu;
     Spu     spu;
+    MemoryCard memcard;
     bool    verbose = false;
     std::function<void(int slot, uint8_t smallMotor, uint8_t bigMotor)> on_vibration;
 
@@ -46,6 +49,17 @@ private:
     void setup_cd();
     void write_pads();
     void dma_write(uint32_t chcr_addr, uint32_t v);
+
+    struct BiosEvent {
+        uint32_t ev_class = 0;
+        uint32_t ev_spec  = 0;
+        uint32_t ev_mode  = 0;
+        uint32_t ev_func  = 0;
+        bool     enabled  = false;
+        bool     triggered = false;
+    };
+    std::map<uint32_t, BiosEvent> bios_events;
+    void trigger_bios_event(MipsCpu& c, uint32_t ev_class, uint32_t ev_spec);
 };
 
 } // namespace cb

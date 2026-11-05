@@ -61,3 +61,7 @@ compile_commands.json
 Thumbs.db
 .DS_Store
 
+# Salvataggi utente (Memory Card virtuale)
+saves/*.mcr
+!saves/.gitkeep
+
