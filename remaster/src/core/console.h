@@ -30,6 +30,7 @@ private:
     FILE*   disc = nullptr;
     uint32_t cd_lba = 0;
     uint32_t vframes = 0;
+    uint64_t frame_start_instr = 0;
     bool     vsync_hit = false;
     int      vsync_frames = 1;
     bool     pad_connected[4] = {};

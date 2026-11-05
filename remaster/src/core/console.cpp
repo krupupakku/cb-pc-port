@@ -48,8 +48,11 @@ void Console::setup_hw() {
     cpu.io_read = [this](uint32_t a, int size) -> uint32_t {
         if (a < 0x1F801000 || a >= 0x1F803000) return 0;
         if (a == 0x1F801120) {
-            // Root Counter 2 (SysClock / 8): timer di sistema PS1 usato da Psy-Q libsnd
-            return (uint32_t)((cpu.instr_count / 8) & 0xFFFF);
+            // Root Counter 2 (SysClock / 8 = 4.2336 MHz).
+            // A 59.94 Hz = esattamente 70631 tick per frame video nominale.
+            uint64_t frame_instr = (cpu.instr_count >= frame_start_instr) ? (cpu.instr_count - frame_start_instr) : 0;
+            uint64_t ticks = (uint64_t)vframes * 70631ULL + frame_instr;
+            return (uint32_t)(ticks & 0xFFFF);
         }
         if (a == 0x1F801814) return gpu.gpustat();
         if (a == 0x1F801810) return gpu.gpuread();
@@ -187,6 +190,7 @@ void Console::write_pads() {
 
 int Console::run_frame(uint64_t max_instr) {
     if (cpu.halted) return 0;
+    frame_start_instr = cpu.instr_count;
     write_pads();
     vsync_hit = false;
     uint64_t end = cpu.instr_count + max_instr;

@@ -18,15 +18,16 @@ uint8_t* MipsCpu::ram_ptr(uint32_t vaddr) {
 uint32_t MipsCpu::read(uint32_t vaddr, int size) {
     uint8_t* p = ram_ptr(vaddr);
     if (p) {
-        uint32_t v = 0;
-        std::memcpy(&v, p, size);
-        return v;
+        if (size == 4) return *reinterpret_cast<const uint32_t*>(p);
+        if (size == 2) return *reinterpret_cast<const uint16_t*>(p);
+        return *p;
     }
     uint32_t phys = vaddr & 0x1FFFFFFF;
-    if (phys >= 0x1F800000 && phys < 0x1F800400) {  // scratchpad: usa fine della RAM virtuale
-        uint32_t v = 0;
-        std::memcpy(&v, &g_scratch[phys & 0x3FF], size);
-        return v;
+    if (phys >= 0x1F800000 && phys < 0x1F800400) {  // scratchpad
+        const uint8_t* sp = &g_scratch[phys & 0x3FF];
+        if (size == 4) return *reinterpret_cast<const uint32_t*>(sp);
+        if (size == 2) return *reinterpret_cast<const uint16_t*>(sp);
+        return *sp;
     }
     if (io_read) return io_read(phys, size);
     return 0;
@@ -34,10 +35,18 @@ uint32_t MipsCpu::read(uint32_t vaddr, int size) {
 
 void MipsCpu::write(uint32_t vaddr, uint32_t val, int size) {
     uint8_t* p = ram_ptr(vaddr);
-    if (p) { std::memcpy(p, &val, size); return; }
+    if (p) {
+        if (size == 4) *reinterpret_cast<uint32_t*>(p) = val;
+        else if (size == 2) *reinterpret_cast<uint16_t*>(p) = static_cast<uint16_t>(val);
+        else *p = static_cast<uint8_t>(val);
+        return;
+    }
     uint32_t phys = vaddr & 0x1FFFFFFF;
     if (phys >= 0x1F800000 && phys < 0x1F800400) {
-        std::memcpy(&g_scratch[phys & 0x3FF], &val, size);
+        uint8_t* sp = &g_scratch[phys & 0x3FF];
+        if (size == 4) *reinterpret_cast<uint32_t*>(sp) = val;
+        else if (size == 2) *reinterpret_cast<uint16_t*>(sp) = static_cast<uint16_t>(val);
+        else *sp = static_cast<uint8_t>(val);
         return;
     }
     if (io_write) io_write(phys, val, size);
@@ -69,13 +78,15 @@ bool MipsCpu::load_psx_exe(const std::string& path) {
 static inline int32_t sx16(uint32_t v) { return (int16_t)v; }
 
 void MipsCpu::step() {
-    // Hook HLE per indirizzo
-    auto it = hooks.find(pc);
-    if (it != hooks.end()) {
-        if (it->second(*this)) {          // gestito: ritorna al chiamante
-            pc = r[31]; next_pc = pc + 4;
-            instr_count++;
-            return;
+    // Hook HLE: controllo rapido dell'intervallo prima della lookup hash
+    if (pc < 0x200 || (pc >= 0x80030000 && pc < 0x80040000)) {
+        auto it = hooks.find(pc);
+        if (it != hooks.end()) {
+            if (it->second(*this)) {          // gestito: ritorna al chiamante
+                pc = r[31]; next_pc = pc + 4;
+                instr_count++;
+                return;
+            }
         }
     }
 

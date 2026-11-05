@@ -5,14 +5,18 @@ set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+if(NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+endif()
+
 if(MSVC)
     add_compile_definitions(_CRT_SECURE_NO_WARNINGS NOMINMAX WIN32_LEAN_AND_MEAN)
-    add_compile_options(/W3 /MP)
+    add_compile_options(/W3 /MP /O2 /Oi /Ot)
 else()
     add_compile_definitions(_CRT_SECURE_NO_WARNINGS NOMINMAX WIN32_LEAN_AND_MEAN)
-    add_compile_options(-Wall -Wextra -Wno-ignored-qualifiers -Wno-delete-non-abstract-non-virtual-dtor -Wno-missing-field-initializers)
+    add_compile_options(-O3 -Wall -Wextra -Wno-ignored-qualifiers -Wno-delete-non-abstract-non-virtual-dtor -Wno-missing-field-initializers -fomit-frame-pointer)
     # Link statico della runtime C++ per poter avviare gli .exe con doppio click da Esplora File
-    add_link_options(-static)
+    add_link_options(-static -O3)
 endif()
 
 # =============================================================================

@@ -247,8 +247,12 @@ void Spu::render(int16_t* out_stereo, int num_samples) {
     if (!out_stereo || num_samples <= 0) return;
     std::fill(out_stereo, out_stereo + num_samples * 2, 0);
 
-    // Buffer di accumulo a 32-bit per evitare clipping intermedio
-    std::vector<int32_t> mix_buf(num_samples * 2, 0);
+    // Buffer di accumulo statico riutilizzato per evitare allocazioni heap a ogni frame
+    static std::vector<int32_t> mix_buf;
+    if (mix_buf.size() < static_cast<size_t>(num_samples * 2)) {
+        mix_buf.resize(num_samples * 2);
+    }
+    std::fill(mix_buf.begin(), mix_buf.begin() + num_samples * 2, 0);
 
     for (int v_idx = 0; v_idx < 24; v_idx++) {
         auto& v = voices[v_idx];

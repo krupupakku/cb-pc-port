@@ -71,11 +71,14 @@ int main(int argc, char** argv) {
     auto off = [](uint32_t a) { return a - 0x1F801000; };
     static Gpu gpu;
     static Spu spu;
+    static uint32_t vframes = 0;
     cpu.io_read = [&](uint32_t a, int size) -> uint32_t {
         if (a < 0x1F801000 || a >= 0x1F803000) { if (io_log[a]++ < 2) std::printf("[io-r?] %08X\n", a); return 0; }
         if (a == 0x1F801120) {
-            // Root Counter 2 (SysClock / 8): incrementa coi cicli CPU
-            return (uint32_t)((cpu.instr_count / 8) & 0xFFFF);
+            // Root Counter 2 (SysClock / 8 = 4.2336 MHz).
+            // A 59.94 Hz = esattamente 70631 tick per frame video nominale.
+            uint64_t ticks = (uint64_t)vframes * 70631ULL + (cpu.instr_count % 70000ULL);
+            return (uint32_t)(ticks & 0xFFFF);
         }
         if (a == 0x1F801814) return gpu.gpustat();
         if (a == 0x1F801810) return gpu.gpuread();
@@ -144,7 +147,6 @@ int main(int argc, char** argv) {
     }
 
     // HLE Psy-Q: VSync(mode) @0x800320EC. -1 = leggi contatore frame; 0/n = attendi (qui: avanza di 1)
-    static uint32_t vframes = 0;
     static std::vector<int16_t> recorded_audio;
     cpu.hooks[0x800320EC] = [&](MipsCpu& c) {
         int32_t mode = (int32_t)c.r[4];

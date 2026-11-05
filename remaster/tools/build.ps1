@@ -15,8 +15,8 @@ if ($llvmPkg)  { $env:PATH = "$($llvmPkg.DirectoryName);$env:PATH" }
 $BuildDir = Join-Path $RepoRoot "build"
 $SrcDir   = Join-Path $RepoRoot "remaster"
 
-Write-Host "=== Configurazione CMake ===" -ForegroundColor Cyan
-cmake -G "MinGW Makefiles" -S $SrcDir -B $BuildDir
+Write-Host "=== Configurazione CMake (Release -O3) ===" -ForegroundColor Cyan
+cmake -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release -S $SrcDir -B $BuildDir
 
 Write-Host "`n=== Compilazione Eseguibili (cb_extract, cb_model2obj, crashbash_remaster) ===" -ForegroundColor Cyan
 cmake --build $BuildDir --parallel
