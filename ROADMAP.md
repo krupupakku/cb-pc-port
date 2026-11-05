@@ -40,11 +40,14 @@ Questa roadmap definisce il percorso tecnico step-by-step per portare *Crash Bas
   - Rasterizer GPU PS1 software ad alte prestazioni con upscaling e display centrico.
   - Correzione proporzioni aspect ratio (4:3 con centering dinamico, eliminato zoom/sbordamento).
   - Correzione bug istruzioni GTE (fix flag e calcolo matrici `OP`, eliminata la distorsione sui modelli di trofei, gemme e cristalli).
-- [x] **Aumento della Risoluzione Interna di Rendering (1x, 2x, 4x Ultra HD):**
-  - Rasterizzazione della geometria poligonale 3D con precisione sub-pixel a risoluzione aumentata (`1024x480` a 2x, `2048x960` a 4x per 4K).
+- [x] **Aumento della Risoluzione Interna di Rendering (1x, 2x, 3x Super HD, 4x Ultra HD):**
+  - Rasterizzazione della geometria poligonale 3D con precisione sub-pixel a risoluzione aumentata (`1024x480` a 2x, `1536x720` a 3x, `2048x960` a 4x per 4K).
+  - Rasterizzatore parallelo a bande orizzontali multi-core con **Thread Pool persistente** (zero overhead di creazione thread).
+  - Ottimizzazione matematica DDA a gradiente costante (eliminati i calcoli baricentrici float e divisioni per-pixel; solo step additivi interi/float).
+  - Lookup texture compatto con caching per blocco subpixel negli sprite 2D/rettangoli e `std::fill_n` ultra-rapido.
   - I contorni dei modelli 3D (Crash, boss, arene, oggetti) sono disegnati con precisione geometrica elevata, eliminando la scalettatura a blocchi nativa della PS1.
   - Supporto al **Texture Bilinear Filtering sui modelli 3D** (attivabile/disattivabile con `F8`).
-  - Ciclo della risoluzione interna a caldo in tempo reale con tasto **`F7`**.
+  - Ciclo della risoluzione interna a caldo in tempo reale con tasto **`F7`** (1x $\to$ 2x $\to$ 3x $\to$ 4x).
 - [x] **Widescreen Hack 3D Nativo (Stile DuckStation):**
   - Espansione del Field of View (FOV) 3D nel coprocessore GTE (`div_x = (div * 3) / 4`).
   - La telecamera 3D inquadra il 33% di scenario in più a destra e a sinistra (mostrando i bordi dell'arena nascosti nelle TV 4:3).

@@ -145,7 +145,8 @@ void SetAspectRatio(float aspect) {
 
 void CycleInternalResolution() {
     if (g_internalScale == 1) g_internalScale = 2;
-    else if (g_internalScale == 2) g_internalScale = 4;
+    else if (g_internalScale == 2) g_internalScale = 3;
+    else if (g_internalScale == 3) g_internalScale = 4;
     else g_internalScale = 1;
     std::printf("[Renderer] Risoluzione Interna impostata a: %s\n", GetInternalResolutionName());
 }
@@ -158,6 +159,7 @@ const char* GetInternalResolutionName() {
     switch (g_internalScale) {
         case 1:  return "1x (Nativo PS1 240p)";
         case 2:  return "2x (HD 480p)";
+        case 3:  return "3x (Super HD 720p)";
         case 4:  return "4x (Ultra HD 4K / 960p)";
         default: return "2x HD";
     }

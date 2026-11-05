@@ -108,6 +108,7 @@ int main(int argc, char* argv[]) {
             cb::audio::SubmitSamples(audio_buf.data(), num_audio_samples);
         }
 
+        console.gpu.flush_hires();   // rasterizzazione HD parallela a bande
         const auto& g = console.gpu;
         cb::renderer::PresentPsxFrame(g.vram.data(), g.disp_x, g.disp_y, g.hres, g.vres, g.disp_enabled, 0.0f,
                                      g.scale > 1 ? g.hires_vram.data() : nullptr, g.scale);
