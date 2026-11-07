@@ -10,11 +10,11 @@ static inline uint32_t hwoff(uint32_t a) { return a - 0x1F801000; }
 static inline uint8_t  bcd(uint32_t v) { return (uint8_t)(((v / 10) << 4) | (v % 10)); }
 static inline uint32_t unbcd(uint8_t v) { return (uint32_t)((v >> 4) * 10 + (v & 15)); }
 
-bool Console::init(const std::string& exePath, const std::string& discBinPath) {
+bool Console::init(const std::string& exePath, const std::string& discBinPath, const std::string& memcardPath) {
     if (!cpu.load_psx_exe(exePath)) { std::printf("[console] impossibile caricare %s\n", exePath.c_str()); return false; }
     disc = std::fopen(discBinPath.c_str(), "rb");
     if (!disc) { std::printf("[console] disco non trovato: %s\n", discBinPath.c_str()); return false; }
-    memcard.init("saves/crashbash_slot1.mcr");
+    memcard.init(memcardPath);
     setup_hw();
     setup_bios();
     setup_cd();

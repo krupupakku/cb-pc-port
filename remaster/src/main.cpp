@@ -13,6 +13,7 @@
 #endif
 
 #include "core/console.h"
+#include "core/texture_manager.h"
 #include "renderer/renderer.h"
 #include "renderer/prompt_overlay.h"
 #include "input/input_manager.h"
@@ -65,13 +66,26 @@ int main(int argc, char* argv[]) {
     cb::audio::Initialize();
     cb::netcode::Initialize();
 
+    std::string texIndex = FindFile("textures/textures_index.dat");
+    std::string remDir = FindFile("textures/remastered");
+    if (!texIndex.empty() && !remDir.empty()) {
+        cb::TextureManager::Instance().Initialize(texIndex, remDir);
+    }
+
+    std::string memcard = FindFile("saves/crashbash_slot1.mcr");
+    if (memcard.empty()) {
+        std::string savesDir = FindFile("saves");
+        if (!savesDir.empty()) memcard = savesDir + "/crashbash_slot1.mcr";
+        else memcard = "saves/crashbash_slot1.mcr";
+    }
+
     static cb::Console console;   // statico: contiene RAM/VRAM
     console.verbose = verbose;
     console.on_vibration = cb::input::SetVibration;
-    if (!console.init(exe, disc)) { Fatal("Inizializzazione console fallita."); return 1; }
+    if (!console.init(exe, disc, memcard)) { Fatal("Inizializzazione console fallita."); return 1; }
 
     std::printf("\n[Info] Controlli di gioco (P1): Frecce/WASD, Z=X(croce), X=quadrato, C=cerchio, V=triangolo, Invio=Start, ESC=esci.\n");
-    std::printf("[Info] Tasti Grafica: F5=Aspect Ratio (4:3 / 16:9 Widescreen 3D Hack), F6=Filtro GLSL (Sharp 4K / CRT / Smooth), F7=Risoluzione Interna (1x / 2x / 4x), F8=Filtro Texture 3D, F11 o Alt+Invio=Schermo Intero.\n\n");
+    std::printf("[Info] Tasti Grafica: F4=Ricarica Texture HD (Hot-Reload), F5=Aspect Ratio, F6=Filtro GLSL, F7=Risoluzione 4K, F8=Filtro Texture 3D, F11=Schermo Intero.\n\n");
 
 #ifdef _WIN32
     timeBeginPeriod(1);

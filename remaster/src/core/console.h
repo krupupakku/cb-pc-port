@@ -21,7 +21,7 @@ public:
     bool    verbose = false;
     std::function<void(int slot, uint8_t smallMotor, uint8_t bigMotor)> on_vibration;
 
-    bool init(const std::string& exePath, const std::string& discBinPath);
+    bool init(const std::string& exePath, const std::string& discBinPath, const std::string& memcardPath = "saves/crashbash_slot1.mcr");
 
     // Esegue il gioco fino al prossimo VSync. Ritorna i frame video consumati (0 = errore/halt).
     int run_frame(uint64_t max_instr = 50000000);

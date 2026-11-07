@@ -1,4 +1,5 @@
 #include "core/gpu.h"
+#include "core/texture_manager.h"
 #include <algorithm>
 #include <cmath>
 #include <condition_variable>
@@ -219,7 +220,10 @@ void Gpu::gp0(uint32_t w) {
                 }
             }
         }
-        if (cpos >= cw * ch) cpu2vram = false;
+        if (cpos >= cw * ch) {
+            cpu2vram = false;
+            TextureManager::Instance().OnVramUpload(cx, cy, cw, ch, vram.data(), scale, hires_vram);
+        }
         return;
     }
 
@@ -498,6 +502,7 @@ void Gpu::hires_tri(const HCmd& cmd, int by0, int by1) {
     const long long dx2 = -(long long)(b.y - a.y), dx0 = -(long long)(d.y - b.y), dx1 = -(long long)(a.y - d.y);
     const float invArea = 1.0f / (float)area;
     const TexSampler ts(vram.data(), cmd.clut, cmd.ctpx, cmd.ctpy, cmd.cdepth, bilinear_tex);
+    const VramBinding* rem_b = cmd.textured ? TextureManager::Instance().FindBinding(cmd.ctpx, cmd.ctpy, a.u, a.v, b.u, b.v, d.u, d.v) : nullptr;
     uint32_t* out = hires_vram.data();
 
     for (int y = miny; y <= maxy; y++) {
@@ -563,6 +568,27 @@ void Gpu::hires_tri(const HCmd& cmd, int by0, int by1) {
                             row[x] = 0xFF000000u | ((uint32_t)bl << 16) | ((uint32_t)g << 8) | (uint32_t)r;
                             continue;
                         }
+                    }
+                }
+
+                if (rem_b) {
+                    float nu = (uf - (float)rem_b->u0) / (float)(rem_b->u1 - rem_b->u0);
+                    float nv = (vf - (float)rem_b->v0) / (float)(rem_b->v1 - rem_b->v0);
+                    uint8_t htr, htg, htb, hta;
+                    if (TextureManager::Instance().Sample(rem_b->tex, nu, nv, ts.bilinear, htr, htg, htb, hta)) {
+                        if (hta < 10) continue;
+                        int tr = htr, tg = htg, tb = htb;
+                        if (!cmd.raw) {
+                            tr = std::clamp((tr * r) >> 7, 0, 255);
+                            tg = std::clamp((tg * g) >> 7, 0, 255);
+                            tb = std::clamp((tb * bl) >> 7, 0, 255);
+                        }
+                        if (cmd.semi && hta < 255) {
+                            row[x] = blend_px(row[x], tr, tg, tb, cmd.csemi);
+                        } else {
+                            row[x] = 0xFF000000u | ((uint32_t)tb << 16) | ((uint32_t)tg << 8) | (uint32_t)tr;
+                        }
+                        continue;
                     }
                 }
 
@@ -644,6 +670,20 @@ void Gpu::raster_tri(const V& a0, const V& b0, const V& c0, bool gouraud, bool t
                         put_pixel(x, y, br, bg, bb, semi, csemi, false);
                         continue;
                     }
+                }
+            }
+
+            const VramBinding* rem_b = TextureManager::Instance().FindBinding(ctpx, ctpy, a.u, a.v, b.u, b.v, c.u, c.v);
+            if (rem_b) {
+                float nu = ((float)u - (float)rem_b->u0) / (float)(rem_b->u1 - rem_b->u0);
+                float nv = ((float)v - (float)rem_b->v0) / (float)(rem_b->v1 - rem_b->v0);
+                uint8_t htr, htg, htb, hta;
+                if (TextureManager::Instance().Sample(rem_b->tex, nu, nv, false, htr, htg, htb, hta)) {
+                    if (hta < 10) continue;
+                    int tr = htr, tg = htg, tb = htb;
+                    if (!raw) { tr = std::min(255, (tr * r) >> 7); tg = std::min(255, (tg * g) >> 7); tb = std::min(255, (tb * bl) >> 7); }
+                    put_pixel(x, y, tr, tg, tb, semi && (hta < 255), csemi, hta < 255);
+                    continue;
                 }
             }
 
@@ -752,6 +792,28 @@ void Gpu::draw_rect(int sizeMode, bool textured, bool semi, bool raw) {
                             }
                             continue;
                         }
+                    }
+                }
+
+                const VramBinding* rem_b = TextureManager::Instance().FindBinding(tpx, tpy, u0, v0, u0 + w, v0, u0, v0 + h);
+                if (rem_b) {
+                    float nu = ((float)(u0 + k) - (float)rem_b->u0) / (float)(rem_b->u1 - rem_b->u0);
+                    float nv = ((float)(v0 + j) - (float)rem_b->v0) / (float)(rem_b->v1 - rem_b->v0);
+                    uint8_t htr, htg, htb, hta;
+                    if (TextureManager::Instance().Sample(rem_b->tex, nu, nv, false, htr, htg, htb, hta)) {
+                        if (hta < 10) continue;
+                        int tr = htr, tg = htg, tb = htb;
+                        if (!raw) { tr = std::min(255, (tr * r) >> 7); tg = std::min(255, (tg * g) >> 7); tb = std::min(255, (tb * b) >> 7); }
+                        pr = tr; pg = tg; pb = tb;
+                        put_pixel(x + k, y + j, pr, pg, pb, semi, semi_mode, hta < 255);
+                        if (scale > 1 && !hires_vram.empty()) {
+                            for (int dy = 0; dy < scale; dy++) {
+                                for (int dx = 0; dx < scale; dx++) {
+                                    put_pixel_hires((x + k) * scale + dx, (y + j) * scale + dy, pr, pg, pb, semi, semi_mode, hta < 255);
+                                }
+                            }
+                        }
+                        continue;
                     }
                 }
 

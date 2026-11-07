@@ -55,9 +55,12 @@ add_executable(cb_boot
     src/core/gte.cpp
     src/core/gpu.cpp
     src/core/spu.cpp
+    src/core/texture_manager.cpp
 )
 target_include_directories(cb_boot PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    "${ORIG_MODEL_TOOL_DIR}"
+    "${ORIG_MODEL_TOOL_DIR}/third_party"
 )
 
 # =============================================================================
@@ -71,6 +74,7 @@ set(CRASHBASH_REMASTER_SRCS
     src/core/spu.cpp
     src/core/console.cpp
     src/core/memory_card.cpp
+    src/core/texture_manager.cpp
     src/renderer/renderer.cpp
     src/renderer/prompt_overlay.cpp
     src/input/input_manager.cpp
@@ -89,6 +93,7 @@ add_executable(crashbash_remaster
 target_include_directories(crashbash_remaster PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
     "${CMAKE_CURRENT_SOURCE_DIR}/../original/repos/crashbash"
+    "${ORIG_MODEL_TOOL_DIR}"
     "${ORIG_MODEL_TOOL_DIR}/third_party"
 )
 

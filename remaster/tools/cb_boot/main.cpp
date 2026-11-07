@@ -3,6 +3,7 @@
 #include "core/mips_cpu.h"
 #include "core/gpu.h"
 #include "core/spu.h"
+#include "core/texture_manager.h"
 #include <cstdio>
 #include <cstdlib>
 #include <map>
@@ -82,6 +83,8 @@ int main(int argc, char** argv) {
 
     MipsCpu cpu;
     if (!cpu.load_psx_exe(exe)) { std::printf("impossibile caricare %s\n", exe); return 1; }
+
+    TextureManager::Instance().Initialize("textures/textures_index.dat", "textures/remastered");
 
     std::map<uint32_t, int> io_log;
     // Registri hardware: file di registri generico con qualche comportamento speciale.

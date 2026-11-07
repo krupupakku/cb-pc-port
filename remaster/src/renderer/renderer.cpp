@@ -1,6 +1,7 @@
 #include "renderer/renderer.h"
 #include "renderer/prompt_overlay.h"
 #include "core/gpu.h"
+#include "core/texture_manager.h"
 #include "input/input_manager.h"
 
 #include <cmath>
@@ -62,7 +63,6 @@ static PFNGLDELETEPROGRAMPROC      glDeleteProgram_ptr      = nullptr;
 #define GL_UNPACK_ROW_LENGTH 0x0CF2
 #endif
 
-#define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
 
 #ifndef GL_CLAMP_TO_EDGE
@@ -435,6 +435,10 @@ static LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM l
             if (wParam == VK_ESCAPE) {
                 g_running = false;
                 PostQuitMessage(0);
+                return 0;
+            }
+            if (wParam == VK_F4) {
+                cb::TextureManager::Instance().Reload();
                 return 0;
             }
             if (wParam == VK_F5) {

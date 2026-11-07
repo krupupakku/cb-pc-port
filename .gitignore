@@ -22,6 +22,8 @@ original/disc/*
 !original/disc/.gitkeep
 original/extracted/*
 !original/extracted/.gitkeep
+textures/extracted/*
+!textures/extracted/.gitkeep
 
 # Repository esterni clonati (gestiti separatamente o tramite script di setup)
 original/repos/*
