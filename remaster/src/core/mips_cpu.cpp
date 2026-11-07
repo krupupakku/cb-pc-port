@@ -392,16 +392,16 @@ void MipsCpu::ensure_extra_menu_tables() {
     write_pause_item(cb::mem::REMASTER_PAUSE_OPT_DESC, 6, -1,      0,   0,   0, 0, 0, 0, 0);
 
     // 5. Descrittore Pause Menu EXTRA in 0x8000C600 (19 record da 24 byte)
-    write_pause_item(cb::mem::REMASTER_PAUSE_EXTRA_DESC, 0, 7,    -10, 216, 216, 0, 0, 0x8080, 0);
-    write_pause_item(cb::mem::REMASTER_PAUSE_EXTRA_DESC, 1, 5, -32768,   6,  56, c_norm1, c_norm2, c_dim1, c_dim2); // EXTRA title
+    write_pause_item(cb::mem::REMASTER_PAUSE_EXTRA_DESC, 0, 7,    -10, 256, 256, 0, 0, 0x8080, 0);
+    write_pause_item(cb::mem::REMASTER_PAUSE_EXTRA_DESC, 1, 5, -32768,  10,  56, c_norm1, c_norm2, c_dim1, c_dim2); // EXTRA title
     write_pause_item(cb::mem::REMASTER_PAUSE_EXTRA_DESC, 2, 6,      1,   0,   0, 0, 0, 0, 0); // Compact Font
     for (int i = 0; i < 6; ++i) {
-        int16_t y = static_cast<int16_t>(42 + i * 20);
+        int16_t y = static_cast<int16_t>(52 + i * 20);
         write_pause_item(cb::mem::REMASTER_PAUSE_EXTRA_DESC, 3 + 2 * i,     0,  90, y, static_cast<int16_t>(57 + i), c_norm1, c_norm2, c_sel1, c_sel2);
         write_pause_item(cb::mem::REMASTER_PAUSE_EXTRA_DESC, 4 + 2 * i,     5, 355, y, static_cast<int16_t>(63 + i), c_norm1, c_norm2, c_dim1, c_dim2);
     }
-    write_pause_item(cb::mem::REMASTER_PAUSE_EXTRA_DESC, 15, 5, -32768, 170, 69, c_norm1, c_norm2, c_dim1, c_dim2);
-    write_pause_item(cb::mem::REMASTER_PAUSE_EXTRA_DESC, 16, 5, -32768, 188, 70, c_norm1, c_norm2, c_dim1, c_dim2);
+    write_pause_item(cb::mem::REMASTER_PAUSE_EXTRA_DESC, 15, 5, -32768, 184, 69, c_norm1, c_norm2, c_dim1, c_dim2);
+    write_pause_item(cb::mem::REMASTER_PAUSE_EXTRA_DESC, 16, 5, -32768, 216, 70, c_norm1, c_norm2, c_dim1, c_dim2);
     write_pause_item(cb::mem::REMASTER_PAUSE_EXTRA_DESC, 17, 6,      0,   0,  0, 0, 0, 0, 0); // Restore Large Font
     write_pause_item(cb::mem::REMASTER_PAUSE_EXTRA_DESC, 18, -1,     0,   0,  0, 0, 0, 0, 0);
 
@@ -432,16 +432,16 @@ void MipsCpu::ensure_extra_menu_tables() {
     // 7. Descrittore Main Menu EXTRA in 0x8000CA00 (18 widget da 36 byte)
     write_mm_widget(cb::mem::REMASTER_MM_EXTRA_DESC, 0, 0x03, 0xFF748000, 0, 0, 0, cb::mem::REMASTER_STR_STATIC_BASE + 0 * 32, 0); // EXTRA banner
     write_mm_widget(cb::mem::REMASTER_MM_EXTRA_DESC, 1, 0x04, 0x015EFEA2, 0xFF9CFF6C, 1, 0, 0, 0); // Top banner box
-    write_mm_widget(cb::mem::REMASTER_MM_EXTRA_DESC, 2, 0x04, 0x00FAFF06, 0x008CFFB4, 1, 0, 0, 0); // Center wide box (x=-250..250, y=-76..140)
+    write_mm_widget(cb::mem::REMASTER_MM_EXTRA_DESC, 2, 0x04, 0x00FAFF06, 0x0096FFB4, 1, 0, 0, 0); // Center wide box (x=-250..250, y=-76..150)
     for (int i = 0; i < 6; ++i) {
-        uint16_t y_u16 = static_cast<uint16_t>(static_cast<int16_t>(-58 + i * 20));
+        uint16_t y_u16 = static_cast<uint16_t>(static_cast<int16_t>(-60 + i * 20));
         uint32_t w1_lbl = (static_cast<uint32_t>(y_u16) << 16) | static_cast<uint16_t>(-220);
         uint32_t w1_val = (static_cast<uint32_t>(y_u16) << 16) | static_cast<uint16_t>(55);
         write_mm_widget(cb::mem::REMASTER_MM_EXTRA_DESC, 3 + 2 * i,     0x03, w1_lbl, 0, 0, 0, cb::mem::REMASTER_STR_STATIC_BASE + (1 + i) * 32, 4);
         write_mm_widget(cb::mem::REMASTER_MM_EXTRA_DESC, 4 + 2 * i,     0x03, w1_val, 0, 0, 0, cb::mem::REMASTER_STR_DYN_BASE + i * 32, 4);
     }
-    write_mm_widget(cb::mem::REMASTER_MM_EXTRA_DESC, 15, 0x03, (74u << 16) | 0x8000u, 0, 0, 0, cb::mem::REMASTER_STR_STATIC_BASE + 7 * 32, 4);
-    write_mm_widget(cb::mem::REMASTER_MM_EXTRA_DESC, 16, 0x03, (94u << 16) | 0x8000u, 0, 0, 0, cb::mem::REMASTER_STR_STATIC_BASE + 8 * 32, 4);
+    write_mm_widget(cb::mem::REMASTER_MM_EXTRA_DESC, 15, 0x03, (74u << 16)  | 0x8000u, 0, 0, 0, cb::mem::REMASTER_STR_STATIC_BASE + 7 * 32, 4);
+    write_mm_widget(cb::mem::REMASTER_MM_EXTRA_DESC, 16, 0x03, (106u << 16) | 0x8000u, 0, 0, 0, cb::mem::REMASTER_STR_STATIC_BASE + 8 * 32, 4);
     write_mm_widget(cb::mem::REMASTER_MM_EXTRA_DESC, 17, 0x00, 0, 0, 0, 0, 0, 0);
 }
 
@@ -472,7 +472,7 @@ bool MipsCpu::handle_extra_menu_hooks() {
                 }
             }
             r[4] = cb::mem::REMASTER_PAUSE_EXTRA_DESC;
-            r[5] = 22;
+            r[5] = static_cast<uint32_t>(static_cast<int32_t>(static_cast<int16_t>(read(cb::mem::PAUSE_OPT_BOX_Y, 2))));
             pc = 0x80081450;
             next_pc = 0x80081454;
             return true;
@@ -569,9 +569,9 @@ bool MipsCpu::handle_extra_menu_hooks() {
             next_pc = 0x800B4B14;
             return true;
         }
-        if (cursor == 3) { // EXIT
-            pc = 0x800B4AD8;
-            next_pc = 0x800B4ADC;
+        if (cursor == 3) { // EXIT (0x800B4B48 chiama 0x8001E824 e torna al Main Menu)
+            pc = 0x800B4B48;
+            next_pc = 0x800B4B4C;
             return true;
         }
         return false;
