@@ -98,6 +98,7 @@ static VideoFilter g_filterMode   = FILTER_SHARP_HD;
 static int         g_internalScale = 2; // Default 2x HD (1024x480), cicla con F7 (1x, 2x, 4x)
 static bool        g_bilinearTex   = true; // Filtro bilineare su texture 3D
 static bool        g_fullscreen   = false;
+static bool        g_loadingConfig = false;
 static RECT        g_prevWinRect  = {};
 static DWORD       g_prevWinStyle = 0;
 
@@ -119,6 +120,7 @@ void StepAspectRatio(int dir) {
     g_aspectMode = static_cast<AspectMode>(next);
     std::printf("[Renderer] Aspect Ratio: %s (3D Widescreen Hack: %s)\n",
                 GetAspectRatioName(), IsWidescreenHackEnabled() ? "ATTIVO" : "DISATTIVATO");
+    SaveConfig();
 }
 
 void CycleAspectRatio() {
@@ -165,6 +167,7 @@ void StepInternalResolution(int dir) {
     idx = (idx + (dir >= 0 ? 1 : -1) + 4) % 4;
     g_internalScale = idx + 1;
     std::printf("[Renderer] Risoluzione Interna impostata a: %s\n", GetInternalResolutionName());
+    SaveConfig();
 }
 
 void CycleInternalResolution() {
@@ -203,6 +206,7 @@ void ToggleBilinearTextures() {
     g_bilinearTex = !g_bilinearTex;
     std::printf("[Renderer] Filtro Texture sui modelli 3D: %s\n",
                 g_bilinearTex ? "Bilineare HD (Morbido)" : "Point Retro (Pixel PS1)");
+    SaveConfig();
 }
 
 bool IsBilinearTexturesEnabled() {
@@ -217,6 +221,7 @@ void StepVideoFilter(int dir) {
     int next = ((int)g_filterMode + (dir >= 0 ? 1 : -1) + (int)FILTER_COUNT) % (int)FILTER_COUNT;
     g_filterMode = static_cast<VideoFilter>(next);
     std::printf("[Renderer] Filtro Video: %s\n", GetVideoFilterName());
+    SaveConfig();
 }
 
 void CycleVideoFilter() {
@@ -267,6 +272,7 @@ void ToggleFullscreen() {
                      SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
     }
     std::printf("[Renderer] Schermo Intero: %s\n", g_fullscreen ? "ATTIVO" : "DISATTIVATO");
+    SaveConfig();
 }
 
 bool IsFullscreen() {
@@ -275,6 +281,141 @@ bool IsFullscreen() {
 
 const char* GetFullscreenMenuLabel() {
     return g_fullscreen ? "<FULLSCRN>" : "<WINDOWED>";
+}
+
+static std::string GetConfigFilePath() {
+    char exePath[MAX_PATH] = {};
+    DWORD len = GetModuleFileNameA(nullptr, exePath, MAX_PATH);
+    if (len > 0 && len < MAX_PATH) {
+        std::string s(exePath, len);
+        size_t pos = s.find_last_of("\\/");
+        if (pos != std::string::npos) {
+            return s.substr(0, pos + 1) + "config.json";
+        }
+    }
+    return "config.json";
+}
+
+void SaveConfig() {
+    if (g_loadingConfig) return;
+    std::string path = GetConfigFilePath();
+    FILE* f = std::fopen(path.c_str(), "wb");
+    if (!f) return;
+
+    const char* aspectStr = "4:3";
+    if (g_aspectMode == ASPECT_16_9)      aspectStr = "16:9";
+    else if (g_aspectMode == ASPECT_21_9) aspectStr = "21:9";
+    else if (g_aspectMode == ASPECT_FILL) aspectStr = "stretch";
+
+    const char* filterStr = "sharp_4k";
+    if (g_filterMode == FILTER_CRT)         filterStr = "crt";
+    else if (g_filterMode == FILTER_SMOOTH) filterStr = "smooth";
+
+    const char* iconsStr = "auto";
+    cb::ui::PromptDevice dev = cb::ui::GetConfiguredPromptDevice();
+    if (dev == cb::ui::PromptDevice::Xbox)             iconsStr = "xbox";
+    else if (dev == cb::ui::PromptDevice::PlayStation) iconsStr = "ps1";
+    else if (dev == cb::ui::PromptDevice::Keyboard)    iconsStr = "keyboard";
+
+    std::fprintf(f,
+        "{\n"
+        "  \"aspect_ratio\": \"%s\",\n"
+        "  \"internal_resolution\": %d,\n"
+        "  \"video_filter\": \"%s\",\n"
+        "  \"bilinear_textures\": %s,\n"
+        "  \"button_icons\": \"%s\",\n"
+        "  \"fullscreen\": %s\n"
+        "}\n",
+        aspectStr,
+        g_internalScale,
+        filterStr,
+        g_bilinearTex ? "true" : "false",
+        iconsStr,
+        g_fullscreen ? "true" : "false"
+    );
+    std::fclose(f);
+}
+
+static std::string ExtractJsonValue(const std::string& json, const char* key) {
+    std::string pat = std::string("\"") + key + "\"";
+    size_t kpos = json.find(pat);
+    if (kpos == std::string::npos) return {};
+    size_t colon = json.find(':', kpos + pat.size());
+    if (colon == std::string::npos) return {};
+    size_t start = colon + 1;
+    while (start < json.size() && (json[start] == ' ' || json[start] == '\t' || json[start] == '\r' || json[start] == '\n')) {
+        ++start;
+    }
+    if (start >= json.size()) return {};
+    if (json[start] == '"') {
+        size_t end = json.find('"', start + 1);
+        if (end == std::string::npos) return {};
+        return json.substr(start + 1, end - (start + 1));
+    }
+    size_t end = start;
+    while (end < json.size() && json[end] != ',' && json[end] != '}' && json[end] != ' ' && json[end] != '\r' && json[end] != '\n') {
+        ++end;
+    }
+    return json.substr(start, end - start);
+}
+
+void LoadConfig() {
+    std::string path = GetConfigFilePath();
+    FILE* f = std::fopen(path.c_str(), "rb");
+    if (!f) {
+        // Primo avvio: genera config.json con i valori predefiniti
+        SaveConfig();
+        std::printf("[Config] Creato nuovo file impostazioni predefinite: %s\n", path.c_str());
+        return;
+    }
+
+    std::fseek(f, 0, SEEK_END);
+    long sz = std::ftell(f);
+    std::fseek(f, 0, SEEK_SET);
+    std::string json;
+    if (sz > 0 && sz < 65536) {
+        json.resize((size_t)sz);
+        std::fread(&json[0], 1, (size_t)sz, f);
+    }
+    std::fclose(f);
+
+    g_loadingConfig = true;
+
+    std::string aspect = ExtractJsonValue(json, "aspect_ratio");
+    if (aspect == "16:9")         g_aspectMode = ASPECT_16_9;
+    else if (aspect == "21:9")    g_aspectMode = ASPECT_21_9;
+    else if (aspect == "stretch") g_aspectMode = ASPECT_FILL;
+    else if (aspect == "4:3")     g_aspectMode = ASPECT_4_3;
+
+    std::string res = ExtractJsonValue(json, "internal_resolution");
+    if (!res.empty()) {
+        int val = std::atoi(res.c_str());
+        if (val >= 1 && val <= 4) g_internalScale = val;
+    }
+
+    std::string filter = ExtractJsonValue(json, "video_filter");
+    if (filter == "crt")           g_filterMode = FILTER_CRT;
+    else if (filter == "smooth")   g_filterMode = FILTER_SMOOTH;
+    else if (filter == "sharp_4k") g_filterMode = FILTER_SHARP_HD;
+
+    std::string bilin = ExtractJsonValue(json, "bilinear_textures");
+    if (bilin == "true")       g_bilinearTex = true;
+    else if (bilin == "false") g_bilinearTex = false;
+
+    std::string icons = ExtractJsonValue(json, "button_icons");
+    if (icons == "xbox")          cb::ui::SetPromptDevice(cb::ui::PromptDevice::Xbox);
+    else if (icons == "ps1")      cb::ui::SetPromptDevice(cb::ui::PromptDevice::PlayStation);
+    else if (icons == "keyboard") cb::ui::SetPromptDevice(cb::ui::PromptDevice::Keyboard);
+    else if (icons == "auto")     cb::ui::SetPromptDevice(cb::ui::PromptDevice::Auto);
+
+    std::string fs = ExtractJsonValue(json, "fullscreen");
+    bool wantFs = (fs == "true");
+    if (wantFs != g_fullscreen) {
+        ToggleFullscreen();
+    }
+
+    g_loadingConfig = false;
+    std::printf("[Config] Impostazioni caricate da: %s\n", path.c_str());
 }
 
 static LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
@@ -584,6 +725,7 @@ bool Initialize(uint32_t internalWidth, uint32_t internalHeight, bool widescreen
     LoadLogoTexture();
     cb::ui::Initialize();
     cb::SetButtonGlyphSampler(cb::ui::SampleButtonGlyph);
+    LoadConfig();
     g_running = true;
 #endif
 

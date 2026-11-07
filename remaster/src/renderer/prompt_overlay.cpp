@@ -4,6 +4,7 @@
 // =============================================================================
 
 #include "renderer/prompt_overlay.h"
+#include "renderer/renderer.h"
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
@@ -244,6 +245,7 @@ void StepPromptDevice(int dir) {
         g_activeDevice = g_configDevice;
     }
     std::printf("[UI Prompts] Stile tasti a schermo: %s\n", GetPromptDeviceName());
+    cb::renderer::SaveConfig();
 }
 
 const char* GetPromptDeviceName() {

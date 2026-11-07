@@ -49,6 +49,10 @@ void ToggleFullscreen();
 bool IsFullscreen();
 const char* GetFullscreenMenuLabel();
 
+// Persistenza impostazioni EXTRA in config.json (accanto a crashbash_remaster.exe)
+void LoadConfig();
+void SaveConfig();
+
 // Mostra l'area di display della VRAM PS1 o del buffer ad alta risoluzione (hires_rgba) nella finestra.
 // enabled=false => schermo nero. aspect <= 0 => usa l'aspect ratio corrente.
 void PresentPsxFrame(const uint16_t* vram, int x, int y, int w, int h, bool enabled, float aspect = 0.0f,
