@@ -44,6 +44,17 @@ constexpr uint32_t kAddrLanguageIndex       = 0x8005A640u; // +0x2C from 0x8005A
 constexpr uint32_t kAddrOverlay722Ptr       = 0x8005DDD0u;
 constexpr uint32_t kAddrFontGlyphTable      = 0x80063EB8u; // 6 bytes per glyph
 
+// --- Memory Card State & Save Buffer (SCUS_945.70 @0x8002C5BC..0x8002D340) ---
+constexpr uint32_t kAddrMemCardPort         = 0x800655B8u; // 0x00 = Slot 1, 0x10 = Slot 2
+constexpr uint32_t kAddrMemCardStatus       = 0x800655C0u; // Bitmask: 0x02=Present, 0x04=Unformatted, 0x08=Corrupt, 0x10=FileValid, 0x20=HasSpace, 0x40=Checking, 0x80=Busy, 0x100=Failed
+constexpr uint32_t kAddrMemCardCmd          = 0x800655C4u; // 0 = Idle, 1 = Save ("BASCUS-94570"), 2 = Format
+constexpr uint32_t kAddrMemCardBuffer       = 0x800655C8u; // 8192-byte (1 block) PS1 save buffer ("SC" header + 3 icons + 4 slots + checksum)
+constexpr uint32_t kAddrMemCardSlots        = 0x800657C8u; // 4 save slots * 0x194 (404) bytes each (0x800657C8..0x80065E17)
+constexpr uint32_t kAddrMemCardChecksum     = 0x80065E24u; // 32-bit additive sum of words in [0x800657C8, 0x80065E18)
+constexpr uint32_t kAddrMemCardState        = 0x800675CCu; // State machine step (0..7) in 0x8002C97C
+constexpr uint32_t kAddrMemCardDirCount     = 0x800675D0u; // Number of DIRENTRY items returned by MemCardGetDirentry
+constexpr uint32_t kAddrMemCardDirTable     = 0x800675D4u; // Array of 15 DIRENTRY structs (40 bytes each)
+
 // --- Pause Menu State & Descriptors ---
 constexpr uint32_t kAddrGlobalStringTable   = 0x80059668u; // char* table[]
 constexpr uint32_t kAddrLangStringTablePtrs = 0x80059748u; // char** langTables[5]

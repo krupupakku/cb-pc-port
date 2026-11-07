@@ -94,18 +94,16 @@ void MipsCpu::step() {
         std::memcpy(&ram[0x569D8], &b68c, 4);
     }
 
-    // Crash Bash Memory Card I/O Completion Sync:
-    // Evita il blocco o attesa infinita degli eventi hardware della memory card:
-    // Slot 1: 0x80047620 (wait loop IOE), 0x800477C4 (event check IOE)
-    // Slot 2: 0x800476F8 (wait loop TIMEOUT), 0x80047800 (event check TIMEOUT)
-    // MemCardSync(0) blocking wait loop: 0x8003A818 (avanza il ticker della card)
+    // Crash Bash Memory Card I/O Completion Sync (fallback per chiamate di basso livello):
+    // - SwCARD (0xF4000001): 0x80047620 (wait loop), 0x800477C4 (event check) -> 0x80078800 (IOE)
+    // - HwCARD (0xF0000011): 0x800476F8 (wait loop), 0x80047800 (event check) -> 0x80078810 (IOE)
     if (pc == 0x80047620 || pc == 0x800477C4) {
         uint32_t one = 1;
-        std::memcpy(&ram[0x78800], &one, 4); // Slot 1 IOE = 1 (Operazione completata con successo)
+        std::memcpy(&ram[0x78800], &one, 4); // SwCARD IOE = 1 (Operazione completata)
     }
     if (pc == 0x800476F8 || pc == 0x80047800) {
         uint32_t one = 1;
-        std::memcpy(&ram[0x78818], &one, 4); // Slot 2 TIMEOUT = 1 (Nessuna card nello Slot 2)
+        std::memcpy(&ram[0x78810], &one, 4); // HwCARD IOE = 1 (Operazione settore completata)
     }
     if (pc == 0x8003A818) {
         call_subroutine(0x8003AAA4);

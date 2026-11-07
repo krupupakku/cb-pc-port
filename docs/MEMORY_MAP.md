@@ -60,6 +60,12 @@ Tutti i file `.bank.bin` (`487`, `716`–`728`) e `722.type_0x69.bin` **non sono
 | `0x8005A646` | `uint16_t` | `g_GameModeFlags` | (`+0x32` da `0x8005A614`) Flag modalità partita |
 | `0x8005A648` | `int16_t` | `g_CurrentLevelId` | (`+0x34` da `0x8005A614`) ID livello/stanza corrente (`0x20` = Warp Room) |
 | `0x8005DDD0` | `void*` | `g_Overlay722Ptr` | Puntatore dati `722.type_0x69.bin` in RAM |
+| `0x800655B8` | `uint32_t` | `g_MemCardPort` | Porta Memory Card attiva (`0x00` = Slot 1, `0x10` = Slot 2) |
+| `0x800655C0` | `uint32_t` | `g_MemCardStatus` | Bitmask stato Memory Card: `0x02`=Presente, `0x04`=Non formattata, `0x08`=Corrotta, `0x10`=File `"BASCUS-94570"` valido, `0x20`=Spazio libero (`>= 8 KB`), `0x40`=Controllo in corso, `0x80`=Salvataggio/Formattazione in corso, `0x100`=Operazione fallita (`SAVE FAILED`) |
+| `0x800655C4` | `uint32_t` | `g_MemCardCommand` | Comando richiesto alla state machine (`0` = nessuno, `1` = Salva `"BASCUS-94570"`, `2` = Formatta card) |
+| `0x800655C8` | `uint8_t[8192]` | `g_MemCardBuffer` | Buffer di 1 blocco PS1 (`8192` byte): `+0x000..0x1FF` header `"SC"` + titolo `"Crash Bash"` + 3 icone; `+0x200..0x84F` (`0x800657C8`) 4 slot di salvataggio da `404` (`0x194`) byte; `+0x85C` (`0x80065E24`) checksum additivo a 32 bit di `[0x800657C8, 0x80065E18)` |
+| `0x800675CC` | `uint32_t` | `g_MemCardStateStep` | Stato corrente (`0..7`) della state machine `0x8002C97C` (`SCUS_945.70`) |
+| `0x80078800` | `uint32_t[8]` | `g_LibmcrdEventFlags` | Flag eventi BIOS `libmcrd`: `0x80078800..0x8007880C` = `SwCARD` (`0xF4000001`: IOE, ERROR, TIMEOUT, NEW); `0x80078810..0x8007881C` = `HwCARD` (`0xF0000011`: IOE, ERROR, TIMEOUT, NEW) |
 | `0x8009AEE8` | `uint32_t` | `g_PauseOptionsSubPage` | Sotto-pagina di `OPTIONS` in Pausa: `0` = `OPTIONS` (`SOUND`/`CONTROLLER`/`EXIT`), `1` = `SOUND`, `2` = `CONTROLLER` |
 | `0x8009AEEC` | `uint32_t` | `g_PauseMenuCursorIdx` | Indice voce selezionata (`0, 1, 2, ...`) nel menu di Pausa corrente |
 | `0x8009AEF0` | `uint32_t` | `g_PauseMenuPlayerPort` | Indice porta controller (`0`..`3`) che controlla il menu di Pausa |

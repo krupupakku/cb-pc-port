@@ -60,6 +60,12 @@ private:
     };
     std::map<uint32_t, BiosEvent> bios_events;
     void trigger_bios_event(MipsCpu& c, uint32_t ev_class, uint32_t ev_spec);
+
+    // Stato coda comandi asincroni Psy-Q libmcrd
+    bool     mc_cmd_pending = false;
+    int      mc_pending_delay = 0;
+    uint32_t mc_last_cmd = 0;
+    uint32_t mc_last_rslt = 0;
 };
 
 } // namespace cb

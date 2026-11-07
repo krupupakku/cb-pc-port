@@ -140,18 +140,20 @@ void Console::setup_bios() {
                     return true;
                 }
 
-                // Emulazione Memory Card (libmcrd / Psy-Q)
+                // Emulazione Memory Card (BIOS B0 / libmcrd)
+                // Event flags in RAM (SCUS_945.70 @0x80078800..0x8007881C):
+                // - SwCARD (0xF4000001): 0x80078800=IOE, 0x80078804=ERROR, 0x80078808=TIMEOUT, 0x8007880C=NEW
+                // - HwCARD (0xF0000011): 0x80078810=IOE, 0x80078814=ERROR, 0x80078818=TIMEOUT, 0x8007881C=NEW
                 if (fn == 0x4A) { // _card_info(port)
                     uint32_t port = c.r[4] & 0x10;
                     if (port == 0) { // Slot 1: Presente e pronta
                         trigger_bios_event(c, 0xF4000001, 0x0004);
-                        uint8_t* ram_ioe = c.ram_ptr(0x80078800);
-                        if (ram_ioe) { uint32_t one = 1; std::memcpy(ram_ioe, &one, 4); }
+                        c.write(0x80078800, 1, 4);
+                        c.write(0x80078808, 0, 4);
                         c.r[2] = 1;
                     } else { // Slot 2: Nessun dispositivo (Timeout)
-                        trigger_bios_event(c, 0xF0000011, 0x0100);
-                        uint8_t* ram_timout = c.ram_ptr(0x80078818);
-                        if (ram_timout) { uint32_t one = 1; std::memcpy(ram_timout, &one, 4); }
+                        trigger_bios_event(c, 0xF4000001, 0x0100);
+                        c.write(0x80078808, 1, 4);
                         c.r[2] = 1;
                     }
                     return true;
@@ -161,55 +163,52 @@ void Console::setup_bios() {
                     if (port == 0) {
                         memcard.load(0);
                         trigger_bios_event(c, 0xF4000001, 0x0004);
-                        uint8_t* ram_ioe = c.ram_ptr(0x80078800);
-                        if (ram_ioe) { uint32_t one = 1; std::memcpy(ram_ioe, &one, 4); }
+                        c.write(0x80078800, 1, 4);
+                        c.write(0x80078810, 1, 4);
                         c.r[2] = 1;
                     } else {
-                        trigger_bios_event(c, 0xF0000011, 0x0100);
+                        trigger_bios_event(c, 0xF4000001, 0x0100);
+                        c.write(0x80078808, 1, 4);
                         c.r[2] = 0;
                     }
                     return true;
                 }
-                if (fn == 0x4C || fn == 0x4D || fn == 0x4E || fn == 0x50 || fn == 0x53) {
+                if (fn == 0x4C || fn == 0x4D || fn == 0x50 || fn == 0x53) { // _card_auto / _new_card / _card_status
                     c.r[2] = 1;
                     return true;
                 }
-                if (fn == 0x4F) { // _card_format(port)
-                    uint32_t port = c.r[4] & 0x10;
-                    if (port == 0 && memcard.format(0)) {
-                        trigger_bios_event(c, 0xF4000001, 0x0004);
-                        uint8_t* ram_ioe = c.ram_ptr(0x80078800);
-                        if (ram_ioe) { uint32_t one = 1; std::memcpy(ram_ioe, &one, 4); }
-                        c.r[2] = 1;
-                    } else {
-                        c.r[2] = 0;
-                    }
-                    return true;
-                }
-                if (fn == 0x51) { // _card_write(port, sector, buf)
+                if (fn == 0x4E || fn == 0x51) { // B0(0x4E) = _card_write(port, sector, buf)
                     uint32_t port = c.r[4] & 0x10;
                     uint32_t sec = c.r[5];
                     uint8_t* buf = c.ram_ptr(c.r[6]);
                     if (port == 0 && buf && memcard.write_sector(0, sec, buf)) {
+                        trigger_bios_event(c, 0xF0000011, 0x0004);
                         trigger_bios_event(c, 0xF4000001, 0x0004);
-                        uint8_t* ram_ioe = c.ram_ptr(0x80078800);
-                        if (ram_ioe) { uint32_t one = 1; std::memcpy(ram_ioe, &one, 4); }
+                        c.write(0x80078810, 1, 4);
+                        c.write(0x80078818, 0, 4);
+                        c.write(0x80078800, 1, 4);
                         c.r[2] = 1;
                     } else {
+                        trigger_bios_event(c, 0xF0000011, 0x0100);
+                        c.write(0x80078818, 1, 4);
                         c.r[2] = 0;
                     }
                     return true;
                 }
-                if (fn == 0x52) { // _card_read(port, sector, buf)
+                if (fn == 0x4F || fn == 0x52) { // B0(0x4F) = _card_read(port, sector, buf)
                     uint32_t port = c.r[4] & 0x10;
                     uint32_t sec = c.r[5];
                     uint8_t* buf = c.ram_ptr(c.r[6]);
                     if (port == 0 && buf && memcard.read_sector(0, sec, buf)) {
+                        trigger_bios_event(c, 0xF0000011, 0x0004);
                         trigger_bios_event(c, 0xF4000001, 0x0004);
-                        uint8_t* ram_ioe = c.ram_ptr(0x80078800);
-                        if (ram_ioe) { uint32_t one = 1; std::memcpy(ram_ioe, &one, 4); }
+                        c.write(0x80078810, 1, 4);
+                        c.write(0x80078818, 0, 4);
+                        c.write(0x80078800, 1, 4);
                         c.r[2] = 1;
                     } else {
+                        trigger_bios_event(c, 0xF0000011, 0x0100);
+                        c.write(0x80078818, 1, 4);
                         c.r[2] = 0;
                     }
                     return true;
@@ -223,13 +222,13 @@ void Console::setup_bios() {
                     uint32_t port = c.r[4] & 0x10;
                     if (port == 0) {
                         trigger_bios_event(c, 0xF4000001, 0x0004);
-                        uint8_t* ram_ioe = c.ram_ptr(0x80078800);
-                        if (ram_ioe) { uint32_t one = 1; std::memcpy(ram_ioe, &one, 4); }
+                        c.write(0x80078800, 1, 4);
+                        c.write(0x80078808, 0, 4);
                         c.r[2] = 1;
                     } else {
                         trigger_bios_event(c, 0xF0000011, 0x0100);
-                        uint8_t* ram_timout = c.ram_ptr(0x80078818);
-                        if (ram_timout) { uint32_t one = 1; std::memcpy(ram_timout, &one, 4); }
+                        c.write(0x80078818, 1, 4);
+                        c.write(0x80078808, 1, 4);
                         c.r[2] = 1;
                     }
                     return true;
@@ -239,11 +238,12 @@ void Console::setup_bios() {
                     if (port == 0) {
                         memcard.load(0);
                         trigger_bios_event(c, 0xF4000001, 0x0004);
-                        uint8_t* ram_ioe = c.ram_ptr(0x80078800);
-                        if (ram_ioe) { uint32_t one = 1; std::memcpy(ram_ioe, &one, 4); }
+                        c.write(0x80078800, 1, 4);
+                        c.write(0x80078810, 1, 4);
                         c.r[2] = 1;
                     } else {
                         trigger_bios_event(c, 0xF0000011, 0x0100);
+                        c.write(0x80078808, 1, 4);
                         c.r[2] = 0;
                     }
                     return true;
@@ -320,6 +320,211 @@ void Console::setup_bios() {
             }
         }
         c.r[2] = 1;
+        return true;
+    };
+
+    // =========================================================================
+    // Hook HLE Psy-Q libmcrd (SCUS_945.70 @0x80039338..0x8003ABAC)
+    // Intercetta le primitive Memory Card di Crash Bash collegandole direttamente
+    // all'immagine standard PS1 .mcr (saves/crashbash_slot1.mcr).
+    // =========================================================================
+
+    // MemCardInit(val) @0x8003ABAC
+    cpu.hooks[0x8003ABAC] = [this](MipsCpu& c) {
+        mc_cmd_pending = false;
+        mc_pending_delay = 0;
+        mc_last_cmd = 0;
+        mc_last_rslt = 0;
+        c.r[2] = 0;
+        return true;
+    };
+
+    // MemCardStart() @0x80039338
+    cpu.hooks[0x80039338] = [](MipsCpu& c) {
+        c.r[2] = 0;
+        return true;
+    };
+
+    // MemCardStop() @0x800393A8
+    cpu.hooks[0x800393A8] = [this](MipsCpu& c) {
+        memcard.flush();
+        c.r[2] = 0;
+        return true;
+    };
+
+    // MemCardCallback() @0x8003AAA4 (tick periodico driver libmcrd)
+    cpu.hooks[0x8003AAA4] = [](MipsCpu& c) {
+        c.r[2] = 0;
+        return true;
+    };
+
+    // MemCardExist(port) @0x800393E8 — asincrona (McFuncExist = 1)
+    cpu.hooks[0x800393E8] = [this](MipsCpu& c) {
+        int port = (int)(c.r[4] & 0x10);
+        mc_last_cmd = 1; // McFuncExist
+        mc_last_rslt = (port == 0) ? 0u : 1u; // 0 = McErrNone, 1 = McErrCardNotExist
+        mc_cmd_pending = true;
+        mc_pending_delay = 0;
+        c.r[2] = 1;
+        return true;
+    };
+
+    // MemCardAccept(port) @0x8003976C — asincrona (McFuncAccept = 2)
+    cpu.hooks[0x8003976C] = [this](MipsCpu& c) {
+        int port = (int)(c.r[4] & 0x10);
+        mc_last_cmd = 2; // McFuncAccept
+        if (port != 0) {
+            mc_last_rslt = 1; // McErrCardNotExist
+        } else if (!memcard.is_formatted()) {
+            mc_last_rslt = 4; // McErrNotFormat
+        } else {
+            mc_last_rslt = 0; // McErrNone
+        }
+        mc_cmd_pending = true;
+        mc_pending_delay = 0;
+        c.r[2] = 1;
+        return true;
+    };
+
+    // MemCardGetDirentry(port, name, dir, files, ofs, max) @0x8003A554 — sincrona
+    cpu.hooks[0x8003A554] = [this](MipsCpu& c) {
+        int port = (int)(c.r[4] & 0x10);
+        uint32_t name_ptr = c.r[5];
+        uint32_t dir_ptr  = c.r[6];
+        uint32_t files_ptr = c.r[7];
+        int32_t ofs = (int32_t)c.read32(c.r[29] + 16);
+        int32_t max_entries = (int32_t)c.read32(c.r[29] + 20);
+
+        std::string pattern;
+        if (uint8_t* p = c.ram_ptr(name_ptr)) {
+            for (int i = 0; i < 32 && p[i]; ++i) pattern += (char)p[i];
+        }
+
+        std::vector<MemoryCard::DirEntry> entries;
+        int res = memcard.get_direntries(port, pattern.c_str(), entries);
+        if (res != 0) {
+            if (files_ptr) c.write(files_ptr, 0, 4);
+            c.r[2] = (uint32_t)res;
+            return true;
+        }
+
+        int total = (int)entries.size();
+        int written = 0;
+        if (dir_ptr && max_entries > 0 && ofs >= 0) {
+            for (int i = ofs; i < total && written < max_entries; ++i, ++written) {
+                uint32_t ent_addr = dir_ptr + (uint32_t)(written * 40);
+                uint8_t* dst = c.ram_ptr(ent_addr);
+                if (!dst) break;
+                std::memset(dst, 0, 40);
+                std::strncpy(reinterpret_cast<char*>(dst), entries[i].name.c_str(), 20);
+                std::memcpy(dst + 20, &entries[i].attr, 4);
+                std::memcpy(dst + 24, &entries[i].size, 4);
+                int32_t head = entries[i].first_block;
+                std::memcpy(dst + 32, &head, 4);
+            }
+        }
+        if (files_ptr) {
+            c.write(files_ptr, (uint32_t)written, 4);
+        }
+        c.r[2] = 0; // McErrNone
+        return true;
+    };
+
+    // MemCardReadFile(port, file, adr, ofs, bytes) @0x8003A114 — asincrona (McFuncReadFile = 5)
+    cpu.hooks[0x8003A114] = [this](MipsCpu& c) {
+        int port = (int)(c.r[4] & 0x10);
+        uint32_t file_ptr = c.r[5];
+        uint32_t adr_ptr  = c.r[6];
+        uint32_t ofs      = c.r[7];
+        uint32_t bytes    = c.read32(c.r[29] + 16);
+
+        std::string filename;
+        if (uint8_t* p = c.ram_ptr(file_ptr)) {
+            for (int i = 0; i < 20 && p[i]; ++i) filename += (char)p[i];
+        }
+
+        uint8_t* dst = c.ram_ptr(adr_ptr);
+        int res = memcard.read_file(port, filename.c_str(), dst, ofs, bytes);
+        mc_last_cmd = 5; // McFuncReadFile
+        mc_last_rslt = (uint32_t)res;
+        mc_cmd_pending = true;
+        mc_pending_delay = 0;
+        c.r[2] = 1;
+        return true;
+    };
+
+    // MemCardWriteFile(port, file, adr, ofs, bytes) @0x8003A334 — asincrona (McFuncWriteFile = 6)
+    cpu.hooks[0x8003A334] = [this](MipsCpu& c) {
+        int port = (int)(c.r[4] & 0x10);
+        uint32_t file_ptr = c.r[5];
+        uint32_t adr_ptr  = c.r[6];
+        uint32_t ofs      = c.r[7];
+        uint32_t bytes    = c.read32(c.r[29] + 16);
+
+        std::string filename;
+        if (uint8_t* p = c.ram_ptr(file_ptr)) {
+            for (int i = 0; i < 20 && p[i]; ++i) filename += (char)p[i];
+        }
+
+        const uint8_t* src = c.ram_ptr(adr_ptr);
+        int res = memcard.write_file(port, filename.c_str(), src, ofs, bytes);
+        mc_last_cmd = 6; // McFuncWriteFile
+        mc_last_rslt = (uint32_t)res;
+        mc_cmd_pending = true;
+        mc_pending_delay = 10; // Breve attesa visiva per mostrare la schermata "SAVING..."
+        c.r[2] = 1;
+        return true;
+    };
+
+    // MemCardCreateFile(port, file, blocks) @0x8003A8E0 — sincrona
+    cpu.hooks[0x8003A8E0] = [this](MipsCpu& c) {
+        int port = (int)(c.r[4] & 0x10);
+        uint32_t file_ptr = c.r[5];
+        int blocks = (int)c.r[6];
+
+        std::string filename;
+        if (uint8_t* p = c.ram_ptr(file_ptr)) {
+            for (int i = 0; i < 20 && p[i]; ++i) filename += (char)p[i];
+        }
+
+        int res = memcard.create_file(port, filename.c_str(), blocks);
+        c.r[2] = (uint32_t)res;
+        return true;
+    };
+
+    // MemCardFormat(port) @0x8003A9DC — sincrona
+    cpu.hooks[0x8003A9DC] = [this](MipsCpu& c) {
+        int port = (int)(c.r[4] & 0x10);
+        bool ok = memcard.format(port);
+        c.r[2] = ok ? 0u : 2u; // 0 = McErrNone, 2 = McErrCardInvalid
+        return true;
+    };
+
+    // MemCardSync(mode, cmds, rslt) @0x8003A7C4
+    cpu.hooks[0x8003A7C4] = [this](MipsCpu& c) {
+        int32_t mode = (int32_t)c.r[4];
+        uint32_t cmds_ptr = c.r[5];
+        uint32_t rslt_ptr = c.r[6];
+
+        if (mc_cmd_pending) {
+            if (mode != 0 && mc_pending_delay > 0) {
+                --mc_pending_delay;
+                c.r[2] = 0; // 0 = Operazione asincrona in corso
+                return true;
+            }
+            mc_pending_delay = 0;
+            mc_cmd_pending = false;
+            if (cmds_ptr) c.write(cmds_ptr, mc_last_cmd, 4);
+            if (rslt_ptr) c.write(rslt_ptr, mc_last_rslt, 4);
+            c.write(0x80076AA8, mc_last_cmd, 4);
+            c.write(0x80076AAC, mc_last_rslt, 4);
+            c.r[2] = 1; // 1 = Operazione completata
+            return true;
+        }
+
+        if (cmds_ptr) c.write(cmds_ptr, mc_last_cmd, 4);
+        if (rslt_ptr) c.write(rslt_ptr, mc_last_rslt, 4);
+        c.r[2] = 0xFFFFFFFFu; // -1 = Nessuna operazione in coda
         return true;
     };
 }
@@ -408,25 +613,6 @@ int Console::run_frame(uint64_t max_instr) {
     if (cpu.halted) return 0;
     frame_start_instr = cpu.instr_count;
     write_pads();
-
-    // Segnala costantemente timeout su Slot 2 (nessun dispositivo) per evitare attese della coda Psy-Q
-    uint8_t* mc2 = cpu.ram_ptr(0x80078818);
-    if (mc2) {
-        uint32_t one = 1;
-        std::memcpy(mc2, &one, 4);
-    }
-
-    // Stato Memory Card per Crash Bash:
-    // 0x800655C0: Bit 1 (0x02) = Presente, Bit 2 (0x04) = Formattata, Bit 4/5 (0x10/0x20) = Pronta/Valida
-    // 0x80065E24: Contatore generazione directory (deve essere >= 1 affinche 991.code.bin popoli gli slot)
-    uint8_t* mc1 = cpu.ram_ptr(0x800655C0);
-    if (mc1) {
-        *(uint32_t*)mc1 |= 0x0036;
-    }
-    uint8_t* mc_e24 = cpu.ram_ptr(0x80065E24);
-    if (mc_e24 && *(uint32_t*)mc_e24 == 0) {
-        *(uint32_t*)mc_e24 = 1;
-    }
 
     vsync_hit = false;
     uint64_t end = cpu.instr_count + max_instr;
