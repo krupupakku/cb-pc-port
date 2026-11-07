@@ -1,4 +1,7 @@
 #include "core/mips_cpu.h"
+#include "core/cb_memory_map.h"
+#include "renderer/renderer.h"
+#include "renderer/prompt_overlay.h"
 #include <cstdio>
 #include <cstring>
 
@@ -16,12 +19,6 @@ uint8_t* MipsCpu::ram_ptr(uint32_t vaddr) {
 }
 
 uint32_t MipsCpu::read(uint32_t vaddr, int size) {
-    if ((vaddr & 0xFFFFFF) == 0x0B34BE) {
-        static int count = 0;
-        if (count++ < 10) {
-            std::printf("[READ GLYPH 0xFC] pc=%08X ra=%08X\n", pc, r[31]);
-        }
-    }
     uint8_t* p = ram_ptr(vaddr);
     if (p) {
         if (size == 4) return *reinterpret_cast<const uint32_t*>(p);
@@ -112,6 +109,14 @@ void MipsCpu::step() {
     }
     if (pc == 0x8003A818) {
         call_subroutine(0x8003AAA4);
+    }
+
+    // Intercettazione nativa del sottomenu "EXTRA" nelle OPTIONS (Main Menu e Pause Menu)
+    if (pc >= 0x8007FEBC && pc <= 0x800B4F60) {
+        if (handle_extra_menu_hooks()) {
+            instr_count++;
+            return;
+        }
     }
 
     // Hook HLE: controllo rapido dell'intervallo prima della lookup hash
@@ -269,6 +274,385 @@ void MipsCpu::call_subroutine(uint32_t target_addr, uint32_t a0) {
     std::memcpy(r, saved_r, sizeof(r));
     pc = saved_pc;
     next_pc = saved_next_pc;
+}
+
+static void apply_extra_setting_step(int item_idx, int dir) {
+    switch (item_idx) {
+    case 0: cb::renderer::StepAspectRatio(dir); break;
+    case 1: cb::renderer::StepInternalResolution(dir); break;
+    case 2: cb::renderer::StepVideoFilter(dir); break;
+    case 3: cb::renderer::ToggleBilinearTextures(); break;
+    case 4: cb::ui::StepPromptDevice(dir); break;
+    case 5: cb::renderer::ToggleFullscreen(); break;
+    default: break;
+    }
+}
+
+void MipsCpu::sync_extra_menu_values() {
+    const char* vals[6] = {
+        cb::renderer::GetAspectRatioMenuLabel(),
+        cb::renderer::GetInternalResolutionMenuLabel(),
+        cb::renderer::GetVideoFilterMenuLabel(),
+        cb::renderer::GetBilinearTexturesMenuLabel(),
+        cb::ui::GetPromptDeviceMenuLabel(),
+        cb::renderer::GetFullscreenMenuLabel()
+    };
+    for (int i = 0; i < 6; ++i) {
+        uint8_t* dst = ram_ptr(cb::mem::REMASTER_STR_DYN_BASE + i * 24);
+        if (dst) {
+            std::memset(dst, 0, 24);
+            std::snprintf(reinterpret_cast<char*>(dst), 24, "%s", vals[i]);
+        }
+    }
+}
+
+void MipsCpu::ensure_extra_menu_tables() {
+    // Sincronizza sempre le stringhe dinamiche dei valori correnti
+    if (read32(cb::mem::PAUSE_STR_TABLE_PTRS) == cb::mem::REMASTER_STR_TABLE_BASE &&
+        read32(cb::mem::REMASTER_PAUSE_OPT_DESC) != 0) {
+        sync_extra_menu_values();
+        return;
+    }
+
+    // 1. Stringhe statiche in 0x8000C200 (slot da 24 byte ciascuno)
+    static const char* kStaticStrings[9] = {
+        "EXTRA",
+        "ASPECT RATIO",
+        "RESOLUTION",
+        "VIDEO FILTER",
+        "TEX FILTER",
+        "BUTTON ICONS",
+        "WINDOW MODE",
+        "PRESS \xff OR LEFT-RIGHT TO CHANGE",
+        "PRESS \xfc BUTTON TO ACCEPT"
+    };
+    for (int i = 0; i < 9; ++i) {
+        uint8_t* dst = ram_ptr(cb::mem::REMASTER_STR_STATIC_BASE + i * 24);
+        if (dst) {
+            std::memset(dst, 0, 24);
+            std::memcpy(dst, kStaticStrings[i], std::strlen(kStaticStrings[i]) + 1);
+        }
+    }
+
+    // 2. Popola i valori dinamici in 0x8000C300 (6 slot da 24 byte)
+    sync_extra_menu_values();
+
+    // 3. Tabella puntatori stringhe estesa in 0x8000C000
+    for (int i = 0; i < 56; ++i) {
+        write(cb::mem::REMASTER_STR_TABLE_BASE + i * 4,
+              read32(cb::mem::PAUSE_STR_TABLE_EN + i * 4), 4);
+    }
+    write(cb::mem::REMASTER_STR_TABLE_BASE + 56 * 4, cb::mem::REMASTER_STR_STATIC_BASE + 0 * 24, 4); // "EXTRA"
+    for (int i = 0; i < 6; ++i) {
+        write(cb::mem::REMASTER_STR_TABLE_BASE + (57 + i) * 4,
+              cb::mem::REMASTER_STR_STATIC_BASE + (1 + i) * 24, 4);
+        write(cb::mem::REMASTER_STR_TABLE_BASE + (63 + i) * 4,
+              cb::mem::REMASTER_STR_DYN_BASE + i * 24, 4);
+    }
+    write(cb::mem::REMASTER_STR_TABLE_BASE + 69 * 4, cb::mem::REMASTER_STR_STATIC_BASE + 7 * 24, 4);
+    write(cb::mem::REMASTER_STR_TABLE_BASE + 70 * 4, cb::mem::REMASTER_STR_STATIC_BASE + 8 * 24, 4);
+
+    // Redireziona tutte le 5 lingue della tabella globale del menu di pausa
+    for (int lang = 0; lang < 5; ++lang) {
+        write(cb::mem::PAUSE_STR_TABLE_PTRS + lang * 4, cb::mem::REMASTER_STR_TABLE_BASE, 4);
+    }
+
+    // 4. Descrittore Pause Menu OPTIONS (4 voci: SOUND, CONTROLLER, EXTRA, EXIT) in 0x8000C500
+    auto write_pause_item = [&](uint32_t base, int idx, int16_t type, int16_t x, int16_t y, int16_t str_id,
+                                uint32_t col1, uint32_t col2, uint32_t sel1, uint32_t sel2) {
+        uint32_t addr = base + idx * 24;
+        write(addr + 0,  (uint16_t)type, 2);
+        write(addr + 2,  (uint16_t)x, 2);
+        write(addr + 4,  (uint16_t)y, 2);
+        write(addr + 6,  (uint16_t)str_id, 2);
+        write(addr + 8,  col1, 4);
+        write(addr + 12, col2, 4);
+        write(addr + 16, sel1, 4);
+        write(addr + 20, sel2, 4);
+    };
+
+    const uint32_t c_norm1 = 0x0000D0FF, c_norm2 = 0x000000FF;
+    const uint32_t c_sel1  = 0x00FFFFFF, c_sel2  = 0x0000FFFF;
+    const uint32_t c_dim1  = 0x00808080, c_dim2  = 0x00404040;
+
+    write_pause_item(cb::mem::REMASTER_PAUSE_OPT_DESC, 0,  2,    -10, 210, 210, 0, 0, 0x8080, 0);
+    write_pause_item(cb::mem::REMASTER_PAUSE_OPT_DESC, 1,  5, -32768,  10,   2, c_norm1, c_norm2, c_dim1, c_dim2); // OPTIONS
+    write_pause_item(cb::mem::REMASTER_PAUSE_OPT_DESC, 2,  0, -32768,  58,  39, c_norm1, c_norm2, c_sel1, c_sel2); // SOUND
+    write_pause_item(cb::mem::REMASTER_PAUSE_OPT_DESC, 3,  0, -32768,  92,  44, c_norm1, c_norm2, c_sel1, c_sel2); // CONTROLLER
+    write_pause_item(cb::mem::REMASTER_PAUSE_OPT_DESC, 4,  0, -32768, 126,  56, c_norm1, c_norm2, c_sel1, c_sel2); // EXTRA
+    write_pause_item(cb::mem::REMASTER_PAUSE_OPT_DESC, 5,  0, -32768, 160,  49, c_norm1, c_norm2, c_sel1, c_sel2); // EXIT
+    write_pause_item(cb::mem::REMASTER_PAUSE_OPT_DESC, 6, -1,      0,   0,   0, 0, 0, 0, 0);
+
+    // 5. Descrittore Pause Menu EXTRA in 0x8000C600 (19 record da 24 byte)
+    write_pause_item(cb::mem::REMASTER_PAUSE_EXTRA_DESC, 0, 7,    -10, 216, 216, 0, 0, 0x8080, 0);
+    write_pause_item(cb::mem::REMASTER_PAUSE_EXTRA_DESC, 1, 5, -32768,   6,  56, c_norm1, c_norm2, c_dim1, c_dim2); // EXTRA title
+    write_pause_item(cb::mem::REMASTER_PAUSE_EXTRA_DESC, 2, 6,      1,   0,   0, 0, 0, 0, 0); // Compact Font
+    for (int i = 0; i < 6; ++i) {
+        int16_t y = static_cast<int16_t>(44 + i * 19);
+        write_pause_item(cb::mem::REMASTER_PAUSE_EXTRA_DESC, 3 + 2 * i,     0,  90, y, static_cast<int16_t>(57 + i), c_norm1, c_norm2, c_sel1, c_sel2);
+        write_pause_item(cb::mem::REMASTER_PAUSE_EXTRA_DESC, 4 + 2 * i,     5, 355, y, static_cast<int16_t>(63 + i), c_norm1, c_norm2, c_dim1, c_dim2);
+    }
+    write_pause_item(cb::mem::REMASTER_PAUSE_EXTRA_DESC, 15, 5, -32768, 166, 69, c_norm1, c_norm2, c_dim1, c_dim2);
+    write_pause_item(cb::mem::REMASTER_PAUSE_EXTRA_DESC, 16, 5, -32768, 184, 70, c_norm1, c_norm2, c_dim1, c_dim2);
+    write_pause_item(cb::mem::REMASTER_PAUSE_EXTRA_DESC, 17, 6,      0,   0,  0, 0, 0, 0, 0); // Restore Large Font
+    write_pause_item(cb::mem::REMASTER_PAUSE_EXTRA_DESC, 18, -1,     0,   0,  0, 0, 0, 0, 0);
+
+    // 6. Descrittore Main Menu OPTIONS (4 voci) in 0x8000C800 (8 widget da 36 byte)
+    auto write_mm_widget = [&](uint32_t base, int idx, uint32_t w0, uint32_t w1, uint32_t w2,
+                               uint32_t w3, uint32_t w4, uint32_t w5, uint32_t w6) {
+        uint32_t addr = base + idx * 36;
+        write(addr + 0,  w0, 4);
+        write(addr + 4,  w1, 4);
+        write(addr + 8,  w2, 4);
+        write(addr + 12, w3, 4);
+        write(addr + 16, w4, 4);
+        write(addr + 20, w5, 4);
+        write(addr + 24, w6, 4);
+        write(addr + 28, 0,  4);
+        write(addr + 32, 0,  4);
+    };
+
+    write_mm_widget(cb::mem::REMASTER_MM_OPT_DESC, 0, 0x0E, 0xFF748000, 0, 0, 0, 0x800B8EE8, 0); // OPTIONS
+    write_mm_widget(cb::mem::REMASTER_MM_OPT_DESC, 1, 0x04, 0x015EFEA2, 0xFF9CFF6C, 1, 0, 0, 0); // Top banner box
+    write_mm_widget(cb::mem::REMASTER_MM_OPT_DESC, 2, 0x04, 0x00BEFF42, 0x0072FFBA, 1, 0, 0, 0); // Center 4-item box
+    write_mm_widget(cb::mem::REMASTER_MM_OPT_DESC, 3, 0x0E, 0xFFD48000, 0, 0, 0, 0x800B8EF0, 0); // SOUND (y=-44)
+    write_mm_widget(cb::mem::REMASTER_MM_OPT_DESC, 4, 0x0E, 0xFFF68000, 0, 0, 0, 0x800B8F08, 0); // CONTROLLER (y=-10)
+    write_mm_widget(cb::mem::REMASTER_MM_OPT_DESC, 5, 0x03, 0x00188000, 0, 0, 0, cb::mem::REMASTER_STR_STATIC_BASE + 0 * 24, 0); // EXTRA (y=+24)
+    write_mm_widget(cb::mem::REMASTER_MM_OPT_DESC, 6, 0x0E, 0x003A8000, 0, 0, 0, 0x800B8EEC, 0); // EXIT (y=+58)
+    write_mm_widget(cb::mem::REMASTER_MM_OPT_DESC, 7, 0x00, 0, 0, 0, 0, 0, 0);
+
+    // 7. Descrittore Main Menu EXTRA in 0x8000CA00 (18 widget da 36 byte)
+    write_mm_widget(cb::mem::REMASTER_MM_EXTRA_DESC, 0, 0x03, 0xFF748000, 0, 0, 0, cb::mem::REMASTER_STR_STATIC_BASE + 0 * 24, 0); // EXTRA banner
+    write_mm_widget(cb::mem::REMASTER_MM_EXTRA_DESC, 1, 0x04, 0x015EFEA2, 0xFF9CFF6C, 1, 0, 0, 0); // Top banner box
+    write_mm_widget(cb::mem::REMASTER_MM_EXTRA_DESC, 2, 0x04, 0x00FAFF06, 0x008CFFB4, 1, 0, 0, 0); // Center wide box (x=-250..250, y=-76..140)
+    for (int i = 0; i < 6; ++i) {
+        uint16_t y_u16 = static_cast<uint16_t>(static_cast<int16_t>(-58 + i * 19));
+        uint32_t w1_lbl = (static_cast<uint32_t>(y_u16) << 16) | static_cast<uint16_t>(-220);
+        uint32_t w1_val = (static_cast<uint32_t>(y_u16) << 16) | static_cast<uint16_t>(55);
+        write_mm_widget(cb::mem::REMASTER_MM_EXTRA_DESC, 3 + 2 * i,     0x03, w1_lbl, 0, 0, 0, cb::mem::REMASTER_STR_STATIC_BASE + (1 + i) * 24, 0);
+        write_mm_widget(cb::mem::REMASTER_MM_EXTRA_DESC, 4 + 2 * i,     0x03, w1_val, 0, 0, 0, cb::mem::REMASTER_STR_DYN_BASE + i * 24, 0);
+    }
+    write_mm_widget(cb::mem::REMASTER_MM_EXTRA_DESC, 15, 0x03, (76u << 16) | 0x8000u, 0, 0, 0, cb::mem::REMASTER_STR_STATIC_BASE + 7 * 24, 4);
+    write_mm_widget(cb::mem::REMASTER_MM_EXTRA_DESC, 16, 0x03, (96u << 16) | 0x8000u, 0, 0, 0, cb::mem::REMASTER_STR_STATIC_BASE + 8 * 24, 4);
+    write_mm_widget(cb::mem::REMASTER_MM_EXTRA_DESC, 17, 0x00, 0, 0, 0, 0, 0, 0);
+}
+
+bool MipsCpu::handle_extra_menu_hooks() {
+    // -------------------------------------------------------------------------
+    // 1. PAUSE MENU OPTIONS: Render Selector (0x80081284 in 991.code.bin)
+    // -------------------------------------------------------------------------
+    if (pc == 0x80081284) {
+        ensure_extra_menu_tables();
+        uint32_t sub_page = read32(cb::mem::PAUSE_OPT_SUBPAGE);
+        if (sub_page == 0) {
+            r[4] = cb::mem::REMASTER_PAUSE_OPT_DESC;
+            r[5] = static_cast<uint32_t>(static_cast<int32_t>(static_cast<int16_t>(read(cb::mem::PAUSE_OPT_BOX_Y, 2))));
+            pc = 0x80081450;
+            next_pc = 0x80081454;
+            return true;
+        }
+        if (sub_page == 3) {
+            int32_t cursor = static_cast<int32_t>(read32(cb::mem::PAUSE_OPT_CURSOR));
+            for (int i = 0; i < 6; ++i) {
+                uint32_t addr = cb::mem::REMASTER_PAUSE_EXTRA_DESC + (4 + 2 * i) * 24;
+                if (i == cursor) {
+                    write(addr + 8,  0x00FFFFFF, 4);
+                    write(addr + 12, 0x0000FFFF, 4);
+                } else {
+                    write(addr + 8,  0x0000D0FF, 4);
+                    write(addr + 12, 0x000000FF, 4);
+                }
+            }
+            r[4] = cb::mem::REMASTER_PAUSE_EXTRA_DESC;
+            r[5] = 22;
+            pc = 0x80081450;
+            next_pc = 0x80081454;
+            return true;
+        }
+        return false;
+    }
+
+    // -------------------------------------------------------------------------
+    // 2. PAUSE MENU OPTIONS: Input Handler (0x8007FEBC in 991.code.bin)
+    // -------------------------------------------------------------------------
+    if (pc == 0x8007FEBC) {
+        ensure_extra_menu_tables();
+        // Estende il limite del menu OPTIONS di pausa da 3 a 4 voci (0=SOUND, 1=CONTROLLER, 2=EXTRA, 3=EXIT)
+        write(0x800802DC, 0x28620004, 4); // slti $v0, $v1, 4
+        write(0x800802E0, 0x24050003, 4); // addiu $a1, $zero, 3
+        write(0x800802F0, 0x24020003, 4); // addiu $v0, $zero, 3 (EXIT index)
+
+        if (read32(cb::mem::PAUSE_OPT_SUBPAGE) == 3) {
+            uint32_t port = read32(cb::mem::PAUSE_PLAYER_PORT) & 3u;
+            uint32_t tapped = read32(cb::mem::PAD_STRUCT_BASE + port * cb::mem::PAD_STRUCT_STRIDE + cb::mem::PAD_TAPPED_OFFSET);
+            int32_t cursor = static_cast<int32_t>(read32(cb::mem::PAUSE_OPT_CURSOR));
+
+            if (tapped & cb::mem::PAD_BTN_UP) {
+                if (cursor > 0) {
+                    write(cb::mem::PAUSE_OPT_CURSOR, static_cast<uint32_t>(cursor - 1), 4);
+                    r[4] = 400;
+                    pc = 0x800801A0;
+                    next_pc = 0x800801A4;
+                    return true;
+                }
+            } else if (tapped & cb::mem::PAD_BTN_DOWN) {
+                if (cursor < 5) {
+                    write(cb::mem::PAUSE_OPT_CURSOR, static_cast<uint32_t>(cursor + 1), 4);
+                    r[4] = 400;
+                    pc = 0x800801A0;
+                    next_pc = 0x800801A4;
+                    return true;
+                }
+            } else if (tapped & (cb::mem::PAD_BTN_LEFT | cb::mem::PAD_BTN_RIGHT | cb::mem::PAD_BTN_SQUARE)) {
+                int dir = (tapped & cb::mem::PAD_BTN_LEFT) ? -1 : 1;
+                apply_extra_setting_step(cursor, dir);
+                sync_extra_menu_values();
+                r[4] = 400;
+                pc = 0x800801A0;
+                next_pc = 0x800801A4;
+                return true;
+            } else if (tapped & (cb::mem::PAD_BTN_CROSS | cb::mem::PAD_BTN_TRIANGLE)) {
+                write(cb::mem::PAUSE_OPT_SUBPAGE, 0, 4);
+                write(cb::mem::PAUSE_OPT_CURSOR,  2, 4); // Mantiene il cursore su EXTRA
+                r[4] = 405;
+                pc = 0x800801A0;
+                next_pc = 0x800801A4;
+                return true;
+            }
+
+            pc = 0x8007F704;
+            next_pc = 0x8007F708;
+            return true;
+        }
+        return false;
+    }
+
+    // Controlla se l'overlay 722.type_0x69.bin (Main Menu) e' attualmente caricato in RAM
+    bool is_main_menu_ovl = (read32(cb::mem::OVERLAY_BASE) == 0x69) &&
+                            ((read32(0x800B49F8) & 0xFFFFFFFCu) == 0x28620000u);
+    if (!is_main_menu_ovl) return false;
+
+    // -------------------------------------------------------------------------
+    // 3. MAIN MENU: MainMenuSetWidgetPage (0x80095BEC)
+    // -------------------------------------------------------------------------
+    if (pc == 0x80095BEC) {
+        ensure_extra_menu_tables();
+        write(0x800B49F8, 0x28620003, 4); // slti $v0, $v1, 3 (consente 4 voci: 0..3)
+        if (r[4] == 4) {
+            if (read32(cb::mem::MAIN_MENU_OPT_SUBPAGE) == 3) {
+                r[5] = cb::mem::REMASTER_MM_EXTRA_DESC;
+            } else if (r[5] == cb::mem::MM_OPT_MAIN_WIDGETS) {
+                r[5] = cb::mem::REMASTER_MM_OPT_DESC;
+            }
+        }
+        return false;
+    }
+
+    // -------------------------------------------------------------------------
+    // 4. MAIN MENU OPTIONS: Cross Button Branch (0x800B4AD0)
+    // -------------------------------------------------------------------------
+    if (pc == 0x800B4AD0) {
+        ensure_extra_menu_tables();
+        uint32_t cursor = read32(cb::mem::MAIN_MENU_OPT_CURSOR);
+        if (cursor == 2) { // EXTRA
+            write(cb::mem::MAIN_MENU_OPT_SUBPAGE, 3, 4);
+            pc = 0x800B4B10;
+            next_pc = 0x800B4B14;
+            return true;
+        }
+        if (cursor == 3) { // EXIT
+            pc = 0x800B4AD8;
+            next_pc = 0x800B4ADC;
+            return true;
+        }
+        return false;
+    }
+
+    // -------------------------------------------------------------------------
+    // 5. MAIN MENU OPTIONS: Input Handler per sub_page == 3 (0x800B498C)
+    // -------------------------------------------------------------------------
+    if (pc == 0x800B498C) {
+        ensure_extra_menu_tables();
+        if (r[3] == 3) {
+            uint32_t tapped = read32(cb::mem::PAD_P1_TAPPED);
+            int32_t cursor = static_cast<int32_t>(read32(cb::mem::MAIN_MENU_OPT_CURSOR));
+
+            auto play_mm_sfx_and_end = [&](uint32_t sfx_id) {
+                r[4] = sfx_id;
+                r[5] = 0;
+                r[6] = 0;
+                r[7] = 0x1000;
+                write(r[29] + 16, 0x1E00, 4);
+                write(r[29] + 20, 0, 4);
+                r[31] = 0x800B4F00;
+                pc = cb::mem::FN_PLAY_UI_SFX;
+                next_pc = cb::mem::FN_PLAY_UI_SFX + 4;
+            };
+
+            if (tapped & cb::mem::PAD_BTN_UP) {
+                if (cursor > 0) {
+                    write(cb::mem::MAIN_MENU_OPT_CURSOR, static_cast<uint32_t>(cursor - 1), 4);
+                    play_mm_sfx_and_end(400);
+                    return true;
+                }
+            } else if (tapped & cb::mem::PAD_BTN_DOWN) {
+                if (cursor < 5) {
+                    write(cb::mem::MAIN_MENU_OPT_CURSOR, static_cast<uint32_t>(cursor + 1), 4);
+                    play_mm_sfx_and_end(400);
+                    return true;
+                }
+            } else if (tapped & (cb::mem::PAD_BTN_LEFT | cb::mem::PAD_BTN_RIGHT | cb::mem::PAD_BTN_SQUARE)) {
+                int dir = (tapped & cb::mem::PAD_BTN_LEFT) ? -1 : 1;
+                apply_extra_setting_step(cursor, dir);
+                sync_extra_menu_values();
+                play_mm_sfx_and_end(400);
+                return true;
+            } else if (tapped & (cb::mem::PAD_BTN_CROSS | cb::mem::PAD_BTN_TRIANGLE)) {
+                extra_return_cursor_ = true;
+                pc = 0x800B4EC0;
+                next_pc = 0x800B4EC4;
+                return true;
+            }
+
+            pc = 0x800B4F00;
+            next_pc = 0x800B4F04;
+            return true;
+        }
+        return false;
+    }
+
+    // -------------------------------------------------------------------------
+    // 6. MAIN MENU OPTIONS: Ripristino cursore su EXTRA al ritorno (0x800B4F00)
+    // -------------------------------------------------------------------------
+    if (pc == 0x800B4F00) {
+        if (extra_return_cursor_) {
+            extra_return_cursor_ = false;
+            write(cb::mem::MAIN_MENU_OPT_CURSOR, 2, 4);
+        }
+        return false;
+    }
+
+    // -------------------------------------------------------------------------
+    // 7. MAIN MENU OPTIONS: Update Visual State per sub_page == 3 (0x800B4F60)
+    // -------------------------------------------------------------------------
+    if (pc == 0x800B4F60) {
+        ensure_extra_menu_tables();
+        if (r[3] == 3 && r[17] != 0) {
+            int32_t cursor = static_cast<int32_t>(read32(cb::mem::MAIN_MENU_OPT_CURSOR));
+            for (int i = 0; i < 6; ++i) {
+                uint32_t state = (i == cursor) ? 2u : 0u;
+                uint32_t w_lbl = r[17] + static_cast<uint32_t>(3 + 2 * i) * 168u;
+                uint32_t w_val = r[17] + static_cast<uint32_t>(4 + 2 * i) * 168u;
+                write(w_lbl + 120, 1, 4);     // Compact font
+                write(w_lbl + 124, state, 4); // Pulsating yellow when selected
+                write(w_val + 120, 1, 4);     // Compact font
+                write(w_val + 124, state, 4); // Pulsating yellow when selected
+            }
+        }
+        return false;
+    }
+
+    return false;
 }
 
 } // namespace cb

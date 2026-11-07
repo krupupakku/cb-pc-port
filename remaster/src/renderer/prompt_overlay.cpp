@@ -225,10 +225,20 @@ PromptDevice GetEffectivePromptDevice() {
 }
 
 void CyclePromptDevice() {
-    if (g_configDevice == PromptDevice::Auto)        g_configDevice = PromptDevice::Xbox;
-    else if (g_configDevice == PromptDevice::Xbox)   g_configDevice = PromptDevice::PlayStation;
-    else if (g_configDevice == PromptDevice::PlayStation) g_configDevice = PromptDevice::Keyboard;
-    else g_configDevice = PromptDevice::Auto;
+    StepPromptDevice(1);
+}
+
+void StepPromptDevice(int dir) {
+    int idx = 0;
+    if (g_configDevice == PromptDevice::Xbox)        idx = 1;
+    else if (g_configDevice == PromptDevice::PlayStation) idx = 2;
+    else if (g_configDevice == PromptDevice::Keyboard)    idx = 3;
+
+    idx = (idx + dir + 4) % 4;
+    if (idx == 0)      g_configDevice = PromptDevice::Auto;
+    else if (idx == 1) g_configDevice = PromptDevice::Xbox;
+    else if (idx == 2) g_configDevice = PromptDevice::PlayStation;
+    else               g_configDevice = PromptDevice::Keyboard;
 
     if (g_configDevice != PromptDevice::Auto) {
         g_activeDevice = g_configDevice;
@@ -245,6 +255,13 @@ const char* GetPromptDeviceName() {
     if (g_configDevice == PromptDevice::Xbox)        return "Xbox Series/One";
     if (g_configDevice == PromptDevice::PlayStation) return "PlayStation (DualShock)";
     return "Tastiera PC";
+}
+
+const char* GetPromptDeviceMenuLabel() {
+    if (g_configDevice == PromptDevice::Auto)        return "< AUTO >";
+    if (g_configDevice == PromptDevice::Xbox)        return "< XBOX >";
+    if (g_configDevice == PromptDevice::PlayStation) return "< PS1 >";
+    return "< KEYS >";
 }
 
 void TogglePromptOverlay() {
@@ -408,7 +425,9 @@ void SetPromptDevice(PromptDevice) {}
 PromptDevice GetConfiguredPromptDevice() { return PromptDevice::Auto; }
 PromptDevice GetEffectivePromptDevice() { return PromptDevice::Auto; }
 void CyclePromptDevice() {}
+void StepPromptDevice(int) {}
 const char* GetPromptDeviceName() { return "None"; }
+const char* GetPromptDeviceMenuLabel() { return "< AUTO >"; }
 void TogglePromptOverlay() {}
 bool IsPromptOverlayVisible() { return false; }
 void NotifyInputActivity(bool, bool) {}

@@ -26,6 +26,7 @@ struct MipsCpu {
     bool     halted = false;
     std::string halt_reason;
     bool     widescreen_hack = false; // DuckStation-style 3D Widescreen FOV Expansion (16:9)
+    bool     extra_return_cursor_ = false; // Mantiene il cursore su EXTRA al ritorno dal sottomenu
 
     std::vector<uint8_t> ram;  // 2 MB
     std::unordered_map<uint32_t, HleHook> hooks;
@@ -48,6 +49,11 @@ struct MipsCpu {
     void run(uint64_t max_instr);
     void call_subroutine(uint32_t target_addr, uint32_t a0 = 0);
     void halt(const std::string& why) { halted = true; halt_reason = why; }
+
+    // Menu in-game "EXTRA" (Opzioni Remaster+ nel Main Menu e nel Pause Menu)
+    bool handle_extra_menu_hooks();
+    void ensure_extra_menu_tables();
+    void sync_extra_menu_values();
 
     // COP2 (GTE): implementato in gte.cpp
     void gte_op(uint32_t instr);

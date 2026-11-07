@@ -12,6 +12,24 @@
 
 using namespace cb;
 
+namespace cb::renderer {
+void StepAspectRatio(int) {}
+void StepInternalResolution(int) {}
+void StepVideoFilter(int) {}
+void ToggleBilinearTextures() {}
+void ToggleFullscreen() {}
+const char* GetAspectRatioMenuLabel() { return "< 4:3 >"; }
+const char* GetInternalResolutionMenuLabel() { return "< 2X 480P >"; }
+const char* GetVideoFilterMenuLabel() { return "<SHARP 4K>"; }
+const char* GetBilinearTexturesMenuLabel() { return "<NEAREST>"; }
+const char* GetFullscreenMenuLabel() { return "<WINDOWED>"; }
+}
+namespace cb::ui {
+void StepPromptDevice(int) {}
+const char* GetPromptDeviceMenuLabel() { return "< AUTO >"; }
+bool SampleButtonGlyph(int, float, float, uint8_t&, uint8_t&, uint8_t&, uint8_t&) { return false; }
+}
+
 static void dump_bmp(const char* path, const std::vector<uint16_t>& vram, int x0, int y0, int w, int h) {
     FILE* f = std::fopen(path, "wb"); if (!f) return;
     int row = (w * 3 + 3) & ~3; uint32_t size = 54 + row * h;

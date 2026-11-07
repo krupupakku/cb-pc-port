@@ -23,7 +23,9 @@ void SetPromptDevice(PromptDevice dev);
 PromptDevice GetConfiguredPromptDevice();
 PromptDevice GetEffectivePromptDevice();
 void CyclePromptDevice();
+void StepPromptDevice(int dir);
 const char* GetPromptDeviceName();
+const char* GetPromptDeviceMenuLabel();
 
 // Mostra / nasconde la barra dei prompt a schermo (Hotkey F9)
 void TogglePromptOverlay();

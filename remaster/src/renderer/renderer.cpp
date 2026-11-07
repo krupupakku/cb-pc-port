@@ -114,10 +114,15 @@ static GLuint g_logoTex = 0;
 static int    g_logoW   = 0;
 static int    g_logoH   = 0;
 
-void CycleAspectRatio() {
-    g_aspectMode = static_cast<AspectMode>((g_aspectMode + 1) % ASPECT_COUNT);
+void StepAspectRatio(int dir) {
+    int next = ((int)g_aspectMode + (dir >= 0 ? 1 : -1) + (int)ASPECT_COUNT) % (int)ASPECT_COUNT;
+    g_aspectMode = static_cast<AspectMode>(next);
     std::printf("[Renderer] Aspect Ratio: %s (3D Widescreen Hack: %s)\n",
                 GetAspectRatioName(), IsWidescreenHackEnabled() ? "ATTIVO" : "DISATTIVATO");
+}
+
+void CycleAspectRatio() {
+    StepAspectRatio(1);
 }
 
 float GetCurrentAspectRatio() {
@@ -140,17 +145,30 @@ const char* GetAspectRatioName() {
     }
 }
 
+const char* GetAspectRatioMenuLabel() {
+    switch (g_aspectMode) {
+        case ASPECT_4_3:  return "< 4:3 >";
+        case ASPECT_16_9: return "< 16:9 >";
+        case ASPECT_21_9: return "< 21:9 >";
+        case ASPECT_FILL: return "<STRETCH>";
+        default: return "< 4:3 >";
+    }
+}
+
 void SetAspectRatio(float aspect) {
     if (aspect >= 1.7f) g_aspectMode = ASPECT_16_9;
     else g_aspectMode = ASPECT_4_3;
 }
 
-void CycleInternalResolution() {
-    if (g_internalScale == 1) g_internalScale = 2;
-    else if (g_internalScale == 2) g_internalScale = 3;
-    else if (g_internalScale == 3) g_internalScale = 4;
-    else g_internalScale = 1;
+void StepInternalResolution(int dir) {
+    int idx = g_internalScale - 1; // 0..3
+    idx = (idx + (dir >= 0 ? 1 : -1) + 4) % 4;
+    g_internalScale = idx + 1;
     std::printf("[Renderer] Risoluzione Interna impostata a: %s\n", GetInternalResolutionName());
+}
+
+void CycleInternalResolution() {
+    StepInternalResolution(1);
 }
 
 int GetInternalResolutionScale() {
@@ -164,6 +182,16 @@ const char* GetInternalResolutionName() {
         case 3:  return "3x (Super HD 720p)";
         case 4:  return "4x (Ultra HD 4K / 960p)";
         default: return "2x HD";
+    }
+}
+
+const char* GetInternalResolutionMenuLabel() {
+    switch (g_internalScale) {
+        case 1:  return "<1X 240P>";
+        case 2:  return "<2X 480P>";
+        case 3:  return "<3X 720P>";
+        case 4:  return "<4X 4K>";
+        default: return "<2X 480P>";
     }
 }
 
@@ -181,9 +209,18 @@ bool IsBilinearTexturesEnabled() {
     return g_bilinearTex;
 }
 
-void CycleVideoFilter() {
-    g_filterMode = static_cast<VideoFilter>((g_filterMode + 1) % FILTER_COUNT);
+const char* GetBilinearTexturesMenuLabel() {
+    return g_bilinearTex ? "<BILINEAR>" : "<NEAREST>";
+}
+
+void StepVideoFilter(int dir) {
+    int next = ((int)g_filterMode + (dir >= 0 ? 1 : -1) + (int)FILTER_COUNT) % (int)FILTER_COUNT;
+    g_filterMode = static_cast<VideoFilter>(next);
     std::printf("[Renderer] Filtro Video: %s\n", GetVideoFilterName());
+}
+
+void CycleVideoFilter() {
+    StepVideoFilter(1);
 }
 
 const char* GetVideoFilterName() {
@@ -192,6 +229,15 @@ const char* GetVideoFilterName() {
         case FILTER_CRT:      return "Retro CRT Scanlines";
         case FILTER_SMOOTH:   return "Smooth Bilinear";
         default: return "Sharp HD";
+    }
+}
+
+const char* GetVideoFilterMenuLabel() {
+    switch (g_filterMode) {
+        case FILTER_SHARP_HD: return "<SHARP 4K>";
+        case FILTER_CRT:      return "<CRT>";
+        case FILTER_SMOOTH:   return "<SMOOTH>";
+        default: return "<SHARP 4K>";
     }
 }
 
@@ -225,6 +271,10 @@ void ToggleFullscreen() {
 
 bool IsFullscreen() {
     return g_fullscreen;
+}
+
+const char* GetFullscreenMenuLabel() {
+    return g_fullscreen ? "<FULLSCRN>" : "<WINDOWED>";
 }
 
 static LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
