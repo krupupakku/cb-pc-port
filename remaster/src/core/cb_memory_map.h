@@ -113,7 +113,7 @@ constexpr uint32_t MAIN_MENU_OPT_SUBPAGE   = psx::cb_mem::kAddrMainMenuOptSubPag
 // --- Remaster+ Custom RAM Region (0x8000C000 - 0x8000CFFF) ---
 constexpr uint32_t REMASTER_STR_TABLE_BASE   = 0x8000C000u;
 constexpr uint32_t REMASTER_STR_STATIC_BASE  = 0x8000C200u;
-constexpr uint32_t REMASTER_STR_DYN_BASE     = 0x8000C300u;
+constexpr uint32_t REMASTER_STR_DYN_BASE     = 0x8000C380u;
 constexpr uint32_t REMASTER_PAUSE_OPT_DESC   = 0x8000C500u;
 constexpr uint32_t REMASTER_PAUSE_EXTRA_DESC = 0x8000C600u;
 constexpr uint32_t REMASTER_MM_OPT_DESC      = 0x8000C800u;

@@ -298,10 +298,10 @@ void MipsCpu::sync_extra_menu_values() {
         cb::renderer::GetFullscreenMenuLabel()
     };
     for (int i = 0; i < 6; ++i) {
-        uint8_t* dst = ram_ptr(cb::mem::REMASTER_STR_DYN_BASE + i * 24);
+        uint8_t* dst = ram_ptr(cb::mem::REMASTER_STR_DYN_BASE + i * 32);
         if (dst) {
-            std::memset(dst, 0, 24);
-            std::snprintf(reinterpret_cast<char*>(dst), 24, "%s", vals[i]);
+            std::memset(dst, 0, 32);
+            std::snprintf(reinterpret_cast<char*>(dst), 32, "%s", vals[i]);
         }
     }
 }
@@ -314,7 +314,15 @@ void MipsCpu::ensure_extra_menu_tables() {
         return;
     }
 
-    // 1. Stringhe statiche in 0x8000C200 (slot da 24 byte ciascuno)
+    // Configura Style 8 (0x8005689C + 8 * 28) nel Main Menu per il font compatto pulsante giallo
+    uint32_t style8 = 0x8005689Cu + 8u * 28u;
+    write(style8 + 0x00, 1, 4);          // font0 = 1 (Compact Font)
+    write(style8 + 0x04, 0x0000D0FF, 4); // col1
+    write(style8 + 0x08, 0x000000FF, 4); // col2
+    write(style8 + 0x0C, 2, 4);          // mode = 2 (Pulsating Yellow Highlight)
+    write(style8 + 0x10, 1, 4);          // font1 = 1 (Compact Font durante la pulsazione)
+
+    // 1. Stringhe statiche in 0x8000C200 (slot da 32 byte ciascuno)
     static const char* kStaticStrings[9] = {
         "EXTRA",
         "ASPECT RATIO",
@@ -323,18 +331,18 @@ void MipsCpu::ensure_extra_menu_tables() {
         "TEX FILTER",
         "BUTTON ICONS",
         "WINDOW MODE",
-        "PRESS \xff OR LEFT-RIGHT TO CHANGE",
+        "PRESS \xff BUTTON TO CHANGE",
         "PRESS \xfc BUTTON TO ACCEPT"
     };
     for (int i = 0; i < 9; ++i) {
-        uint8_t* dst = ram_ptr(cb::mem::REMASTER_STR_STATIC_BASE + i * 24);
+        uint8_t* dst = ram_ptr(cb::mem::REMASTER_STR_STATIC_BASE + i * 32);
         if (dst) {
-            std::memset(dst, 0, 24);
+            std::memset(dst, 0, 32);
             std::memcpy(dst, kStaticStrings[i], std::strlen(kStaticStrings[i]) + 1);
         }
     }
 
-    // 2. Popola i valori dinamici in 0x8000C300 (6 slot da 24 byte)
+    // 2. Popola i valori dinamici in 0x8000C380 (6 slot da 32 byte)
     sync_extra_menu_values();
 
     // 3. Tabella puntatori stringhe estesa in 0x8000C000
@@ -342,15 +350,15 @@ void MipsCpu::ensure_extra_menu_tables() {
         write(cb::mem::REMASTER_STR_TABLE_BASE + i * 4,
               read32(cb::mem::PAUSE_STR_TABLE_EN + i * 4), 4);
     }
-    write(cb::mem::REMASTER_STR_TABLE_BASE + 56 * 4, cb::mem::REMASTER_STR_STATIC_BASE + 0 * 24, 4); // "EXTRA"
+    write(cb::mem::REMASTER_STR_TABLE_BASE + 56 * 4, cb::mem::REMASTER_STR_STATIC_BASE + 0 * 32, 4); // "EXTRA"
     for (int i = 0; i < 6; ++i) {
         write(cb::mem::REMASTER_STR_TABLE_BASE + (57 + i) * 4,
-              cb::mem::REMASTER_STR_STATIC_BASE + (1 + i) * 24, 4);
+              cb::mem::REMASTER_STR_STATIC_BASE + (1 + i) * 32, 4);
         write(cb::mem::REMASTER_STR_TABLE_BASE + (63 + i) * 4,
-              cb::mem::REMASTER_STR_DYN_BASE + i * 24, 4);
+              cb::mem::REMASTER_STR_DYN_BASE + i * 32, 4);
     }
-    write(cb::mem::REMASTER_STR_TABLE_BASE + 69 * 4, cb::mem::REMASTER_STR_STATIC_BASE + 7 * 24, 4);
-    write(cb::mem::REMASTER_STR_TABLE_BASE + 70 * 4, cb::mem::REMASTER_STR_STATIC_BASE + 8 * 24, 4);
+    write(cb::mem::REMASTER_STR_TABLE_BASE + 69 * 4, cb::mem::REMASTER_STR_STATIC_BASE + 7 * 32, 4);
+    write(cb::mem::REMASTER_STR_TABLE_BASE + 70 * 4, cb::mem::REMASTER_STR_STATIC_BASE + 8 * 32, 4);
 
     // Redireziona tutte le 5 lingue della tabella globale del menu di pausa
     for (int lang = 0; lang < 5; ++lang) {
@@ -388,12 +396,12 @@ void MipsCpu::ensure_extra_menu_tables() {
     write_pause_item(cb::mem::REMASTER_PAUSE_EXTRA_DESC, 1, 5, -32768,   6,  56, c_norm1, c_norm2, c_dim1, c_dim2); // EXTRA title
     write_pause_item(cb::mem::REMASTER_PAUSE_EXTRA_DESC, 2, 6,      1,   0,   0, 0, 0, 0, 0); // Compact Font
     for (int i = 0; i < 6; ++i) {
-        int16_t y = static_cast<int16_t>(44 + i * 19);
+        int16_t y = static_cast<int16_t>(42 + i * 20);
         write_pause_item(cb::mem::REMASTER_PAUSE_EXTRA_DESC, 3 + 2 * i,     0,  90, y, static_cast<int16_t>(57 + i), c_norm1, c_norm2, c_sel1, c_sel2);
         write_pause_item(cb::mem::REMASTER_PAUSE_EXTRA_DESC, 4 + 2 * i,     5, 355, y, static_cast<int16_t>(63 + i), c_norm1, c_norm2, c_dim1, c_dim2);
     }
-    write_pause_item(cb::mem::REMASTER_PAUSE_EXTRA_DESC, 15, 5, -32768, 166, 69, c_norm1, c_norm2, c_dim1, c_dim2);
-    write_pause_item(cb::mem::REMASTER_PAUSE_EXTRA_DESC, 16, 5, -32768, 184, 70, c_norm1, c_norm2, c_dim1, c_dim2);
+    write_pause_item(cb::mem::REMASTER_PAUSE_EXTRA_DESC, 15, 5, -32768, 170, 69, c_norm1, c_norm2, c_dim1, c_dim2);
+    write_pause_item(cb::mem::REMASTER_PAUSE_EXTRA_DESC, 16, 5, -32768, 188, 70, c_norm1, c_norm2, c_dim1, c_dim2);
     write_pause_item(cb::mem::REMASTER_PAUSE_EXTRA_DESC, 17, 6,      0,   0,  0, 0, 0, 0, 0); // Restore Large Font
     write_pause_item(cb::mem::REMASTER_PAUSE_EXTRA_DESC, 18, -1,     0,   0,  0, 0, 0, 0, 0);
 
@@ -417,23 +425,23 @@ void MipsCpu::ensure_extra_menu_tables() {
     write_mm_widget(cb::mem::REMASTER_MM_OPT_DESC, 2, 0x04, 0x00BEFF42, 0x0072FFBA, 1, 0, 0, 0); // Center 4-item box
     write_mm_widget(cb::mem::REMASTER_MM_OPT_DESC, 3, 0x0E, 0xFFD48000, 0, 0, 0, 0x800B8EF0, 0); // SOUND (y=-44)
     write_mm_widget(cb::mem::REMASTER_MM_OPT_DESC, 4, 0x0E, 0xFFF68000, 0, 0, 0, 0x800B8F08, 0); // CONTROLLER (y=-10)
-    write_mm_widget(cb::mem::REMASTER_MM_OPT_DESC, 5, 0x03, 0x00188000, 0, 0, 0, cb::mem::REMASTER_STR_STATIC_BASE + 0 * 24, 0); // EXTRA (y=+24)
+    write_mm_widget(cb::mem::REMASTER_MM_OPT_DESC, 5, 0x03, 0x00188000, 0, 0, 0, cb::mem::REMASTER_STR_STATIC_BASE + 0 * 32, 0); // EXTRA (y=+24)
     write_mm_widget(cb::mem::REMASTER_MM_OPT_DESC, 6, 0x0E, 0x003A8000, 0, 0, 0, 0x800B8EEC, 0); // EXIT (y=+58)
     write_mm_widget(cb::mem::REMASTER_MM_OPT_DESC, 7, 0x00, 0, 0, 0, 0, 0, 0);
 
     // 7. Descrittore Main Menu EXTRA in 0x8000CA00 (18 widget da 36 byte)
-    write_mm_widget(cb::mem::REMASTER_MM_EXTRA_DESC, 0, 0x03, 0xFF748000, 0, 0, 0, cb::mem::REMASTER_STR_STATIC_BASE + 0 * 24, 0); // EXTRA banner
+    write_mm_widget(cb::mem::REMASTER_MM_EXTRA_DESC, 0, 0x03, 0xFF748000, 0, 0, 0, cb::mem::REMASTER_STR_STATIC_BASE + 0 * 32, 0); // EXTRA banner
     write_mm_widget(cb::mem::REMASTER_MM_EXTRA_DESC, 1, 0x04, 0x015EFEA2, 0xFF9CFF6C, 1, 0, 0, 0); // Top banner box
     write_mm_widget(cb::mem::REMASTER_MM_EXTRA_DESC, 2, 0x04, 0x00FAFF06, 0x008CFFB4, 1, 0, 0, 0); // Center wide box (x=-250..250, y=-76..140)
     for (int i = 0; i < 6; ++i) {
-        uint16_t y_u16 = static_cast<uint16_t>(static_cast<int16_t>(-58 + i * 19));
+        uint16_t y_u16 = static_cast<uint16_t>(static_cast<int16_t>(-58 + i * 20));
         uint32_t w1_lbl = (static_cast<uint32_t>(y_u16) << 16) | static_cast<uint16_t>(-220);
         uint32_t w1_val = (static_cast<uint32_t>(y_u16) << 16) | static_cast<uint16_t>(55);
-        write_mm_widget(cb::mem::REMASTER_MM_EXTRA_DESC, 3 + 2 * i,     0x03, w1_lbl, 0, 0, 0, cb::mem::REMASTER_STR_STATIC_BASE + (1 + i) * 24, 0);
-        write_mm_widget(cb::mem::REMASTER_MM_EXTRA_DESC, 4 + 2 * i,     0x03, w1_val, 0, 0, 0, cb::mem::REMASTER_STR_DYN_BASE + i * 24, 0);
+        write_mm_widget(cb::mem::REMASTER_MM_EXTRA_DESC, 3 + 2 * i,     0x03, w1_lbl, 0, 0, 0, cb::mem::REMASTER_STR_STATIC_BASE + (1 + i) * 32, 4);
+        write_mm_widget(cb::mem::REMASTER_MM_EXTRA_DESC, 4 + 2 * i,     0x03, w1_val, 0, 0, 0, cb::mem::REMASTER_STR_DYN_BASE + i * 32, 4);
     }
-    write_mm_widget(cb::mem::REMASTER_MM_EXTRA_DESC, 15, 0x03, (76u << 16) | 0x8000u, 0, 0, 0, cb::mem::REMASTER_STR_STATIC_BASE + 7 * 24, 4);
-    write_mm_widget(cb::mem::REMASTER_MM_EXTRA_DESC, 16, 0x03, (96u << 16) | 0x8000u, 0, 0, 0, cb::mem::REMASTER_STR_STATIC_BASE + 8 * 24, 4);
+    write_mm_widget(cb::mem::REMASTER_MM_EXTRA_DESC, 15, 0x03, (74u << 16) | 0x8000u, 0, 0, 0, cb::mem::REMASTER_STR_STATIC_BASE + 7 * 32, 4);
+    write_mm_widget(cb::mem::REMASTER_MM_EXTRA_DESC, 16, 0x03, (94u << 16) | 0x8000u, 0, 0, 0, cb::mem::REMASTER_STR_STATIC_BASE + 8 * 32, 4);
     write_mm_widget(cb::mem::REMASTER_MM_EXTRA_DESC, 17, 0x00, 0, 0, 0, 0, 0, 0);
 }
 
@@ -478,9 +486,10 @@ bool MipsCpu::handle_extra_menu_hooks() {
     if (pc == 0x8007FEBC) {
         ensure_extra_menu_tables();
         // Estende il limite del menu OPTIONS di pausa da 3 a 4 voci (0=SOUND, 1=CONTROLLER, 2=EXTRA, 3=EXIT)
-        write(0x800802DC, 0x28620004, 4); // slti $v0, $v1, 4
-        write(0x800802E0, 0x24050003, 4); // addiu $a1, $zero, 3
-        write(0x800802F0, 0x24020003, 4); // addiu $v0, $zero, 3 (EXIT index)
+        // Nota: 0x800802DC contiene "jal 0x8007EFC0" (MenuHandleUpDownCross) e NON va sovrascritto!
+        write(0x800802DC, 0x0C01FBF0, 4); // Ripristina jal 0x8007EFC0 (MenuHandleUpDownCross)
+        write(0x800802E0, 0x24050003, 4); // addiu $a1, $zero, 3 (maxIdx = 3 nel delay slot)
+        write(0x800802F0, 0x24020003, 4); // addiu $v0, $zero, 3 (EXIT index = 3)
 
         if (read32(cb::mem::PAUSE_OPT_SUBPAGE) == 3) {
             uint32_t port = read32(cb::mem::PAUSE_PLAYER_PORT) & 3u;
@@ -640,13 +649,12 @@ bool MipsCpu::handle_extra_menu_hooks() {
         if (r[3] == 3 && r[17] != 0) {
             int32_t cursor = static_cast<int32_t>(read32(cb::mem::MAIN_MENU_OPT_CURSOR));
             for (int i = 0; i < 6; ++i) {
-                uint32_t state = (i == cursor) ? 2u : 0u;
+                // Style 8 = Compact Font pulsante giallo; Style 4 = Compact Font normale arancio
+                uint32_t style = (i == cursor) ? 8u : 4u;
                 uint32_t w_lbl = r[17] + static_cast<uint32_t>(3 + 2 * i) * 168u;
                 uint32_t w_val = r[17] + static_cast<uint32_t>(4 + 2 * i) * 168u;
-                write(w_lbl + 120, 1, 4);     // Compact font
-                write(w_lbl + 124, state, 4); // Pulsating yellow when selected
-                write(w_val + 120, 1, 4);     // Compact font
-                write(w_val + 124, state, 4); // Pulsating yellow when selected
+                write(w_lbl + 124, style, 4);
+                write(w_val + 124, style, 4);
             }
         }
         return false;

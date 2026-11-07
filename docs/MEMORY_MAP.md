@@ -137,6 +137,14 @@ Tutti i file `.bank.bin` (`487`, `716`–`728`) e `722.type_0x69.bin` **non sono
   * `0x800B8F20` (`f_off 0x5C6C`): Pagina `OPTIONS` nel Main Menu
   * `0x800B901C` (`f_off 0x5D68`): Pagina `SOUND` nel Main Menu
   * `0x800B91CC` (`f_off 0x5F18`): Pagina `CONTROLLER` nel Main Menu
+* **Tabella Stili Widget Main Menu (`0x8005689C` in `SCUS_945.70`, 28 byte per stile)**:
+  * L'offset `+0x7C` (`+124`) dell'istanza widget (inizializzato da `w6` nel descrittore da 36 byte) è l'indice nella tabella `0x8005689C` (valutata da `0x8001C448` ad ogni frame, che sovrascrive `widget+120` `font_size`, `widget+112` `colTop` e `widget+116` `colBot`):
+    * `Style 0`: `font0=0` (Large), `col1=0x0000D0FF`, `col2=0x000000FF`, `mode=0` (Arancio/Rosso normale)
+    * `Style 2`: `font0=0` (Large), `col1=0x0000D0FF`, `col2=0x000000FF`, `mode=2` (Evidenziato giallo pulsante)
+    * `Style 4`: `font0=1` (Compact), `col1=0x0000D0FF`, `col2=0x000000FF`, `mode=0` (Compatto Arancio/Rosso normale)
+    * `Style 8`: `font0=1` (Compact), configurato dal Remaster+ con `mode=2, font1=1` per il font compatto giallo pulsante.
+* **Pause Menu `OPTIONS` Root Input (`0x800802D8` in `991.code.bin`)**:
+  * `0x800802DC` contiene `jal 0x8007EFC0` (`MenuHandleUpDownCross`) e non va sovrascritto; il suo argomento `maxIdx` è nel delay slot a `0x800802E0` (`addiu $a1, $zero, 2` -> `3`), mentre l'indice di `EXIT` è a `0x800802F0` (`addiu $v0, $zero, 2` -> `3`).
 
 ---
 
