@@ -532,17 +532,17 @@ void Gpu::hires_tri(const HCmd& cmd, int by0, int by1) {
 
                 // Sostituzione in-game dei glifi dei pulsanti con le texture HD del controller attivo (Xbox / PlayStation / Tastiera)
                 // SCUS_945.70 Font Sprite Table (tpx=1, tpy=1, v=240..255, w=32, h=16):
-                // 102 [Cross]:    u=64..95,   v=240..255 -> btn 0 (Xbox A, KB Space)
-                // 101 [Triangle]: u=96..127,  v=240..255 -> btn 2 (Xbox Y, KB V)
-                // 100 [Circle]:   u=128..159, v=240..255 -> btn 3 (Xbox B, KB C)
-                //  98 [Square]:   u=160..191, v=240..255 -> btn 1 (Xbox X, KB X)
+                // 102 [Cross,    0xFC]: u=64..95,   v=240..255 -> btn 0 (Xbox A, KB Space)
+                // 101 [Triangle, 0xFE]: u=96..127,  v=240..255 -> btn 2 (Xbox Y, KB V)
+                // 100 [Square,   0xFF]: u=128..159, v=240..255 -> btn 1 (Xbox X, KB X)
+                //  98 [Circle,   0xFD]: u=160..191, v=240..255 -> btn 3 (Xbox B, KB C)
                 if (cmd.ctpx == 1 && cmd.ctpy == 1 && vf >= 239.0f && vf <= 256.0f) {
                     int btn = -1;
                     float u0 = 0.0f;
                     if (uf >= 64.0f && uf < 96.0f)        { btn = 0; u0 = 64.0f; }
                     else if (uf >= 96.0f && uf < 128.0f)  { btn = 2; u0 = 96.0f; }
-                    else if (uf >= 128.0f && uf < 160.0f) { btn = 3; u0 = 128.0f; }
-                    else if (uf >= 160.0f && uf < 192.0f) { btn = 1; u0 = 160.0f; }
+                    else if (uf >= 128.0f && uf < 160.0f) { btn = 1; u0 = 128.0f; }
+                    else if (uf >= 160.0f && uf < 192.0f) { btn = 3; u0 = 160.0f; }
 
                     if (btn >= 0) {
                         float nu = std::clamp((uf - u0) * (1.0f / 31.0f), 0.0f, 1.0f);
@@ -632,8 +632,8 @@ void Gpu::raster_tri(const V& a0, const V& b0, const V& c0, bool gouraud, bool t
                 float u0 = 0.0f;
                 if (u >= 64 && u < 96)        { btn = 0; u0 = 64.0f; }  // Cross (Xbox A / KB Space)
                 else if (u >= 96 && u < 128)  { btn = 2; u0 = 96.0f; }  // Triangle (Xbox Y / KB V)
-                else if (u >= 128 && u < 160) { btn = 3; u0 = 128.0f; } // Circle (Xbox B / KB C)
-                else if (u >= 160 && u < 192) { btn = 1; u0 = 160.0f; } // Square (Xbox X / KB X)
+                else if (u >= 128 && u < 160) { btn = 1; u0 = 128.0f; } // Square (Xbox X / KB X)
+                else if (u >= 160 && u < 192) { btn = 3; u0 = 160.0f; } // Circle (Xbox B / KB C)
 
                 if (btn >= 0) {
                     float nu = std::clamp(((float)u - u0) * (1.0f / 31.0f), 0.0f, 1.0f);
@@ -732,8 +732,8 @@ void Gpu::draw_rect(int sizeMode, bool textured, bool semi, bool raw) {
                     float ub0 = 0.0f;
                     if (u >= 64 && u < 96)        { btn = 0; ub0 = 64.0f; }  // Cross
                     else if (u >= 96 && u < 128)  { btn = 2; ub0 = 96.0f; }  // Triangle
-                    else if (u >= 128 && u < 160) { btn = 3; ub0 = 128.0f; } // Circle
-                    else if (u >= 160 && u < 192) { btn = 1; ub0 = 160.0f; } // Square
+                    else if (u >= 128 && u < 160) { btn = 1; ub0 = 128.0f; } // Square
+                    else if (u >= 160 && u < 192) { btn = 3; ub0 = 160.0f; } // Circle
 
                     if (btn >= 0) {
                         float nu = std::clamp(((float)u - ub0) * (1.0f / 31.0f), 0.0f, 1.0f);
